@@ -44,9 +44,9 @@ pip install -e .
 ```
 FAIML-RL-26/
 ├── README.md
+├── requirements.txt
 ├── phase1/ <-- about Hopper
 │   ├── agent.py
-│   ├── requirements.txt
 │   ├── test_random_policy.py
 │   ├── train.py
 │   └── colab_template/
@@ -54,6 +54,7 @@ FAIML-RL-26/
 └── phase2/ <-- about PushTask
     ├── eval_sb3.py
     ├── rand_wrapper.py <-- randomization wrapper for UDR/ADR
+    ├── test_random_policy.py
     ├── train_sb3.py
     └── panda-gym/
         └── panda_gym/ (main package)
