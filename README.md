@@ -1,6 +1,6 @@
 # Starting code for course project of FAIML - 01VSDWS
 
-Official assignment at [Google Doc](to update)
+Official assignment at [Google Doc](https://docs.google.com/document/d/1AXgLXux3l69vDAPLL-UYD3luFOw3JbyR-pLCS2yuNZk/edit?usp=sharing)
 
 
 
@@ -37,7 +37,7 @@ NOTE 2: you need to stay connected to the Google Colab interface at all times fo
 
 ```
 FAIML-RL-26/
-├── readme.md
+├── README.md
 ├── phase1/ <-- about Hopper
 │   ├── agent.py
 │   ├── requirements.txt
