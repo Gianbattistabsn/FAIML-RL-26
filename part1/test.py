@@ -25,7 +25,7 @@ def main():
         # keep running until the episode is done
         while not done:
             
-            action, action_log_prob = agent.get_action(state, evaluation=False)
+            action, action_log_prob = agent.get_action(state, evaluation=True)
             
             next_state, reward, terminated, truncated, _ = env.step(action.detach().cpu().numpy())
 

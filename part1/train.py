@@ -10,7 +10,7 @@ from agent import Agent, Policy
 
 algorithm = 'reinforce'
 baseline = 20
-NUM_EPISODES = 500
+NUM_EPISODES = 50000
 SEED = 42
 RENDER = False
 PATH = f"part1/checkpoints/{algorithm}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}"
