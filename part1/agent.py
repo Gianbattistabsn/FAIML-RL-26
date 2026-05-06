@@ -73,7 +73,12 @@ class Policy(torch.nn.Module):
 
 class Agent(object):
     def __init__(self, policy, device='cpu'):
-        self.train_device = device
+        self.train_device=device
+        if torch.cuda.is_available():
+            self.train_device = 'cuda'
+        elif torch.xpu.is_available():
+            self.train_device = 'xpu'
+        
         self.policy = policy.to(self.train_device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
@@ -85,7 +90,7 @@ class Agent(object):
         self.done = []
 
 
-    def update_policy(self):
+    def update_policy(self, algorithm='reinforce', baseline = 0):
         action_log_probs = torch.stack(self.action_log_probs, dim=0).to(self.train_device).squeeze(-1)
         states = torch.stack(self.states, dim=0).to(self.train_device).squeeze(-1)
         next_states = torch.stack(self.next_states, dim=0).to(self.train_device).squeeze(-1)
@@ -94,13 +99,21 @@ class Agent(object):
 
         self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
 
-        #
+        
         # TASK 2:
         #   - compute discounted returns
+        G_t = discount_rewards(rewards, self.gamma)
         #   - compute policy gradient loss function given actions and returns
-        #   - compute gradients and step the optimizer
-        #
-
+        if algorithm == 'reinforce':
+            # done is introduced for safety since reinforce needs a full episode.
+            # we should pass done = terminated or truncated
+            actor_loss = (- (G_t - baseline) * action_log_probs).mean()            
+            """
+            The minus sign is required since, by default, torch does gradient
+            descent. However, we need gradient ASCENT.
+            Thus, the need to introduce minus.
+            """
+        
 
         #
         # TASK 3:
@@ -110,6 +123,13 @@ class Agent(object):
         #   - compute gradients and step the optimizer
         #
 
+
+        #   By step 2 - compute gradients and step the optimizer
+        # can be generalized
+        self.optimizer.zero_grad()
+        actor_loss.backward()
+        self.optimizer.step()
+        
         return        
 
 
