@@ -106,32 +106,23 @@ class Agent(object):
         #   - compute discounted returns
         G_t = discount_rewards(rewards, self.gamma)
         #   - compute policy gradient loss function given actions and returns
-        if algorithm == 'reinforce':
-            # done is introduced for safety since reinforce needs a full episode.
-            # we should pass done = terminated or truncated
-            actor_loss = (- (G_t - baseline) * action_log_probs).mean()            
-            """
-            The minus sign is required since, by default, torch does gradient
-            descent. However, we need gradient ASCENT.
-            Thus, the need to introduce minus.
-            """
-        
+        if algorithm == 'reinforce' and done[-1] == True:
+            actor_loss = (- (G_t - baseline) * action_log_probs).mean()
+            # The minus sign turns gradient descent into gradient ascent,
+            # since we want to MAXIMISE expected return.
+
+            self.optimizer.zero_grad()
+            actor_loss.backward()
+            self.optimizer.step()
 
         #
         # TASK 3:
-        #   - compute boostrapped discounted return estimates
+        #   - compute bootstrapped discounted return estimates
         #   - compute advantage terms
         #   - compute actor loss and critic loss
         #   - compute gradients and step the optimizer
         #
 
-
-        #   By step 2 - compute gradients and step the optimizer
-        # can be generalized
-        self.optimizer.zero_grad()
-        actor_loss.backward()
-        self.optimizer.step()
-        
         return        
 
 
