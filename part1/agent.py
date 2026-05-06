@@ -66,7 +66,7 @@ class Policy(torch.nn.Module):
             Critic
         """
         # TASK 3: forward in the critic network
-
+        
         
         return normal_dist
 
@@ -78,6 +78,8 @@ class Agent(object):
             self.train_device = 'cuda'
         elif torch.xpu.is_available():
             self.train_device = 'xpu'
+        else:
+            self.train_device = 'cpu'
         
         self.policy = policy.to(self.train_device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
