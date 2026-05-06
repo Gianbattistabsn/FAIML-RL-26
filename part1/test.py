@@ -32,8 +32,6 @@ def main():
             # The episode is over if EITHER termination condition is met.
             done = terminated or truncated
 
-            agent.store_outcome(state, next_state, action_log_prob, reward, done)
-
             if RENDER:
                 env.render()   # refresh the visual window
             state = next_state
