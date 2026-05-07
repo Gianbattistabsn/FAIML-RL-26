@@ -126,7 +126,6 @@ class Agent(object):
         rewards = torch.stack(self.rewards, dim=0).to(self.train_device).squeeze(-1)
         done = torch.Tensor(self.done).to(self.train_device)
 
-        self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
 
         
         # TASK 2:
@@ -141,6 +140,10 @@ class Agent(object):
             self.optimizer.zero_grad()
             actor_loss.backward()
             self.optimizer.step()
+            self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
+        elif algorithm=='actor':
+            self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
+
 
         #
         # TASK 3:
