@@ -4,10 +4,12 @@
 """
 import datetime
 import os
+import random
 
 import numpy as np
 import gymnasium as gym
 import torch
+import torch.nn.functional as F
 from agent import Agent, Policy
 
 
@@ -28,6 +30,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
     torch.cuda.manual_seed_all(seed)
     torch.xpu.manual_seed_all(seed)
     np.random.seed(seed)
+    random.seed(seed)
 
     # Create the Hopper environment. render_mode='human' opens a visual window.
     # We skip rendering during training because it slows things down a lot.
@@ -42,8 +45,11 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
 
     # Timestamp used in checkpoint filenames so I can tell runs apart.
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    ep_rewards = []    # store total reward per episode so I can plot the "learning curve" later
-    total_reward = 0.0 # running sum of all rewards across all episodes
+    ep_rewards = []     # store total reward per episode so I can plot the "learning curve" later
+    ep_lengths = []     # store episode length (steps) per episode
+    ep_losses  = []     # actor loss value at the end of each episode
+    sigma_history = []  # σ snapshot (after softplus) every 100 episodes, for plotting
+    total_reward = 0.0  # running sum of all rewards across all episodes
     best_avg_reward = float('-inf')  # track the best 100-episode moving average seen so far
     best_ckpt_path = None            # path to the current best checkpoint on disk
 
@@ -53,6 +59,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
         # I vary the seed per episode so the agent sees slightly different starting states.
         state, _ = env.reset(seed=seed + i)
         ep_reward = 0.0
+        ep_length = 0
 
         # Inner loop: run one full episode
         while not done:
@@ -67,6 +74,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
             # terminated = the robot fell; truncated = we hit the max step limit
             done = terminated or truncated
             ep_reward += reward
+            ep_length += 1
 
             # Store this transition so update_policy() can use it for the gradient update.
             agent.store_outcome(state, next_state, action_log_prob, reward, done)
@@ -74,18 +82,34 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
             # update_policy() is called every step, but the actual gradient update
             # only fires when done=True (end of episode) because REINFORCE is Monte Carlo:
             # it needs the full trajectory to compute the return G_t.
-            agent.update_policy(algorithm=algorithm, baseline=baseline)
+            loss = agent.update_policy(algorithm=algorithm, baseline=baseline)
 
             state = next_state  # advance to the next state
         # End of episode
 
         ep_rewards.append(ep_reward)
+        ep_lengths.append(ep_length)
+        if loss is not None:
+            ep_losses.append(loss)
         total_reward += ep_reward
 
         # Every 100 episodes: print progress and check if this is the best model so far
         if (i + 1) % 100 == 0:
-            avg_100 = np.mean(ep_rewards[-100:])
-            print(f"Episode {i+1}/{num_episodes}  avg-100: {avg_100:.1f}")
+            recent_rewards = ep_rewards[-100:]
+            avg_100   = np.mean(recent_rewards)
+            min_100   = np.min(recent_rewards)
+            max_100   = np.max(recent_rewards)
+            avg_len   = np.mean(ep_lengths[-100:])
+            avg_loss  = np.mean(ep_losses[-100:]) if ep_losses else float('nan')
+            sigma_eff = F.softplus(policy.sigma).detach().cpu().numpy()
+            sigma_history.append((i + 1, sigma_eff.copy()))
+            print(
+                f"Ep {i+1:>6}/{num_episodes} | "
+                f"avg: {avg_100:7.1f}  min: {min_100:7.1f}  max: {max_100:7.1f} | "
+                f"len: {avg_len:5.0f} | loss: {avg_loss:8.4f} | "
+                f"σ: [{', '.join(f'{s:.3f}' for s in sigma_eff)}] | "
+                f"best: {best_avg_reward:.1f}"
+            )
 
             if avg_100 > best_avg_reward:
                 best_avg_reward = avg_100
@@ -106,7 +130,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
     # so I can compare runs just by looking at the filenames without loading them.
     final_path = os.path.join(checkpoint_dir, f"{algorithm}_{run_id}_{total_reward:.0f}_{num_episodes}_{total_reward/num_episodes:.1f}.pt")
     torch.save(policy.state_dict(), final_path)
-    return policy, ep_rewards, final_path
+    return policy, ep_rewards, ep_lengths, ep_losses, sigma_history, final_path
 
 
 def main():

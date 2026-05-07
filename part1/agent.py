@@ -141,19 +141,11 @@ class Agent(object):
             actor_loss.backward()
             self.optimizer.step()
             self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
+            return actor_loss.item()
         elif algorithm=='actor':
             self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
 
-
-        #
-        # TASK 3:
-        #   - compute bootstrapped discounted return estimates
-        #   - compute advantage terms
-        #   - compute actor loss and critic loss
-        #   - compute gradients and step the optimizer
-        #
-
-        return        
+        return None
 
 
     def get_action(self, state, evaluation=False):
