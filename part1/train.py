@@ -25,7 +25,8 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
 
     # Fix seeds so results are reproducible across runs
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed) 
+    torch.cuda.manual_seed_all(seed)
+    torch.xpu.manual_seed_all(seed)
     np.random.seed(seed)
 
     # Create the Hopper environment. render_mode='human' opens a visual window.

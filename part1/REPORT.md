@@ -129,56 +129,77 @@ The `get_action()` method behaves differently depending on whether we are traini
 
 During evaluation, the agent is fully **deterministic**: it always picks the mean of the distribution. This makes the evaluation fair and reproducible.
 
-## Why $\log \pi(a \mid s)$?
+## Why $\log \pi(a \mid s)$ and why the loss is a mean over steps
 
-### The objective
+### Step 1 — the objective is over full trajectories
 
-We want to maximise the expected return:
+The objective $J(\theta)$ is the expected return of a full trajectory $\tau = (s_0, a_0, r_0, s_1, a_1, \ldots)$:
 
-$$J(\theta) = \mathbb{E}_{a \sim \pi_\theta}\left[ G_t \right] = \int G_t \cdot \pi_\theta(a) \, da$$
+$$J(\theta) = \mathbb{E}_{\tau \sim \pi_\theta}[G_0] = \int p_\theta(\tau) \cdot G_0(\tau) \, d\tau$$
 
-To do gradient ascent we need $\nabla_\theta J$. Intuitively, one might think of writing `loss = G_t * pi` and calling `.backward()` — after all, $\pi_\theta$ is differentiable w.r.t. $\theta$. The problem is not technical but mathematical: **it gives the wrong gradient**.
+The probability of a trajectory factorises over steps:
 
-### Why `G_t * π` is biased
+$$p_\theta(\tau) = p(s_0) \prod_{t=0}^{T-1} \pi_\theta(a_t \mid s_t) \cdot p(s_{t+1} \mid s_t, a_t)$$
 
-When we estimate an integral using samples $a \sim \pi_\theta$, those samples are drawn with probability proportional to $\pi_\theta(a)$. So the sample average of $f(a)$ is actually:
+### Step 2 — the log-derivative trick
 
-$$\mathbb{E}_{a \sim \pi_\theta}[f(a)] = \int \pi_\theta(a) \cdot f(a) \, da$$
+To compute $\nabla_\theta J$ we apply the identity $\nabla \log f = \frac{\nabla f}{f}$ to $p_\theta(\tau)$:
 
-If we set $f(a) = G_t \cdot \nabla_\theta \pi_\theta(a)$ and estimate it with one sample, we get:
+$$\nabla_\theta J = \mathbb{E}_\tau \left[ G_0 \cdot \nabla_\theta \log p_\theta(\tau) \right]$$
 
-$$\mathbb{E}[\cdot] = \int \pi_\theta(a) \cdot G_t \cdot \nabla_\theta \pi_\theta(a) \, da \quad \neq \nabla_\theta J$$
+Only $\pi_\theta$ depends on $\theta$ (the transition model $p(s_{t+1}|s_t,a_t)$ and the initial state $p(s_0)$ do not). So:
 
-There is an extra $\pi_\theta(a)$ factor — actions that are already probable get over-weighted, regardless of how good they actually are.
+$$\nabla_\theta \log p_\theta(\tau) = \sum_{t=0}^{T-1} \nabla_\theta \log \pi_\theta(a_t \mid s_t)$$
 
-### The log-derivative trick fixes this
+**The sum over $t$ appears because** $\log$ turns the product of per-step probabilities into a sum. Substituting:
 
-Using the identity $\nabla_\theta \pi = \pi \cdot \nabla_\theta \log \pi$, we rewrite:
+$$\nabla_\theta J = \mathbb{E}_\tau \left[ G_0 \cdot \sum_{t=0}^{T-1} \nabla_\theta \log \pi_\theta(a_t \mid s_t) \right]$$
 
-$$\nabla_\theta J = \int G_t \cdot \nabla_\theta \pi_\theta \, da = \int \pi_\theta \cdot G_t \cdot \nabla_\theta \log \pi_\theta \, da = \mathbb{E}_{a \sim \pi_\theta}\!\left[ G_t \cdot \nabla_\theta \log \pi_\theta \right]$$
+### Step 3 — causality: replace $G_0$ with $G_t$
 
-Now the sample estimator is correct:
+Action $a_t$ cannot have caused rewards received **before** step $t$. Removing those past rewards does not bias the gradient but reduces its variance. The standard result is:
 
-$$\mathbb{E}_{a \sim \pi_\theta}\!\left[ G_t \cdot \nabla_\theta \log \pi(a) \right] = \int \pi(a) \cdot G_t \cdot \frac{\nabla_\theta \pi(a)}{\pi(a)} \, da = \int G_t \cdot \nabla_\theta \pi(a) \, da = \nabla_\theta J \;\checkmark$$
+$$\nabla_\theta J = \mathbb{E}_\tau \left[ \sum_{t=0}^{T-1} G_t \cdot \nabla_\theta \log \pi_\theta(a_t \mid s_t) \right]$$
 
-The $\frac{1}{\pi(a)}$ inside the log **exactly cancels** the $\pi(a)$ introduced by sampling. A rare but excellent action $a_2$ with $\pi(a_2)=0.1$ contributes $\frac{\nabla_\theta\pi(a_2)}{0.1}$ — its low probability is corrected for automatically.
+where $G_t = \sum_{k=0}^{T-1-t} \gamma^k r_{t+k}$ is the discounted return from step $t$ onwards.
 
+### Step 4 — Monte Carlo estimate and the loss
 
-### In code
+We cannot compute the expectation over all possible trajectories. We approximate it with the single episode we just collected, treating each of the $T$ steps as an independent sample:
+
+$$\nabla_\theta J \approx \sum_{t=0}^{T-1} G_t \cdot \nabla_\theta \log \pi_\theta(a_t \mid s_t) = T \cdot \frac{1}{T}\sum_{t=0}^{T-1} G_t \cdot \nabla_\theta \log \pi_\theta(a_t \mid s_t)$$
+
+We build a loss whose gradient equals this quantity (up to the $\frac{1}{T}$ scale, which does not affect direction):
+
+$$\mathcal{L}(\theta) = -\frac{1}{T} \sum_{t=0}^{T-1} \hat{G}_t \cdot \log \pi_\theta(a_t \mid s_t)$$
+
+The minus sign turns gradient descent (PyTorch default) into gradient ascent on $J$.
+
+### Dimensions in code
 
 ```python
+# G_t     shape: (T,)  — one discounted return per step of the episode
+# G_t     is then normalised: (G_t - mean) / (std + 1e-8)
+
+# action_log_probs  shape: (T,)  — one scalar log π(a_t|s_t) per step
+#   each entry = sum of log-probs over the 3 joints (already summed in get_action):
+#   log π(a_t|s_t) = log π(a_t[0]|s_t) + log π(a_t[1]|s_t) + log π(a_t[2]|s_t)
+
 actor_loss = (-(G_t - baseline) * action_log_probs).mean()
+#              ↑ element-wise product, shape (T,)              ↑ mean over T steps
 actor_loss.backward()
 ```
 
-$G_t$ is just a scalar weight (a number from the environment, no grad needed). All the gradient flows through `log_prob`, which explicitly contains $\mu$ and $\sigma$ — so `.backward()` can reach the network weights $\theta$.
+`G_t` is a plain tensor with no gradient — it comes from the environment. All the gradient flows through `action_log_probs`, which depends on $\mu$ and $\sigma$ through the Gaussian log-probability formula, so `.backward()` can reach all of $\theta$.
 
-Because the 3 joints are modelled as **independent** Gaussians, the joint probability is a product, and the log turns it into a sum:
+Why `.mean()` and not `.sum()`? Both give the same gradient direction, but `.sum()` scales with episode length $T$: a 500-step episode would produce a gradient 10× larger than a 50-step one, making the learning rate unreliable. `.mean()` keeps the gradient magnitude roughly constant regardless of episode length.
+
+Because the 3 joints are modelled as **independent** Gaussians, the joint log-probability is a sum:
 
 $$\log \pi(a \mid s) = \log \pi(a_0 \mid s) + \log \pi(a_1 \mid s) + \log \pi(a_2 \mid s)$$
 
 ```python
-action_log_prob = normal_dist.log_prob(action).sum()
+action_log_prob = normal_dist.log_prob(action).sum()  # sum over 3 joints → scalar
 ```
 
 ## How $\sigma$ gets updated: the gradient path
@@ -344,8 +365,8 @@ The gradient update fires **once per episode** (at the very end), not at every s
 | Discount factor $\gamma$ | 0.99 | |
 | Baseline | 20 | Constant subtracted from $G_t$ |
 | Initial $\sigma$ | 0.5 | Starting exploration level |
-| Episodes (local) | 20 000 | In `train.py` standalone |
-| Episodes (Colab) | 5 000 | In notebook (faster to run) |
+| Episodes (local) | 25 000 | In `train.py` standalone |
+| Episodes (Colab) | 25 000 | In notebook |
 | Seed | 42 | For reproducibility |
 
 ## What is still to do (Task 3)
