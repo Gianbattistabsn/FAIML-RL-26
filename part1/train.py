@@ -44,10 +44,11 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     ep_rewards = []    # store total reward per episode so I can plot the "learning curve" later
     total_reward = 0.0 # running sum of all rewards across all episodes
+    best_avg_reward = float('-inf')  # track the best 100-episode moving average seen so far
+    best_ckpt_path = None            # path to the current best checkpoint on disk
 
     for i in range(num_episodes):
         done = False
-
         # Reset the environment at the start of each episode.
         # I vary the seed per episode so the agent sees slightly different starting states.
         state, _ = env.reset(seed=seed + i)
@@ -81,9 +82,22 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
         ep_rewards.append(ep_reward)
         total_reward += ep_reward
 
-        # Print a progress update every 100 episodes, including the moving average reward
+        # Every 100 episodes: print progress and check if this is the best model so far
         if (i + 1) % 100 == 0:
-            print(f"Episode {i+1}/{num_episodes}  avg-100: {np.mean(ep_rewards[-100:]):.1f}")
+            avg_100 = np.mean(ep_rewards[-100:])
+            print(f"Episode {i+1}/{num_episodes}  avg-100: {avg_100:.1f}")
+
+            if avg_100 > best_avg_reward:
+                best_avg_reward = avg_100
+                # Delete the previous best checkpoint to avoid filling disk
+                if best_ckpt_path is not None and os.path.exists(best_ckpt_path):
+                    os.remove(best_ckpt_path)
+                best_ckpt_path = os.path.join(
+                    checkpoint_dir,
+                    f"{algorithm}_best_ep{i+1}_avg{avg_100:.0f}.pt"
+                )
+                torch.save(policy.state_dict(), best_ckpt_path)
+                print(f"  → New best! Saved to {os.path.basename(best_ckpt_path)}")
 
 
     env.close()
