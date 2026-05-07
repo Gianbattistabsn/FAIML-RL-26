@@ -73,7 +73,7 @@ def main():
     if not ckpts:
         print(f"No checkpoints found under {checkpoint_root}/")
         return
-    ckpt = ckpts[-1]
+    ckpt = ckpts[-2]
     print(f"Loading: {ckpt}")
     rewards = evaluate(ckpt, render=RENDER)
     print(f"Mean reward: {np.mean(rewards):.2f}")
