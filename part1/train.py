@@ -47,7 +47,8 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     ep_rewards = []     # store total reward per episode so I can plot the "learning curve" later
     ep_lengths = []     # store episode length (steps) per episode
-    ep_losses  = []     # actor loss value at the end of each episode
+    ep_actor_losses  = []     # actor loss value at the end of each episode
+    ep_critic_losses  = []     # critic loss value at the end of each episode
     sigma_history = []  # σ snapshot (after softplus) every 100 episodes, for plotting
     total_reward = 0.0  # running sum of all rewards across all episodes
     best_avg_reward = float('-inf')  # track the best 100-episode moving average seen so far
@@ -82,15 +83,19 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
             # update_policy() is called every step, but the actual gradient update
             # only fires when done=True (end of episode) because REINFORCE is Monte Carlo:
             # it needs the full trajectory to compute the return G_t.
-            loss = agent.update_policy(algorithm=algorithm, baseline=baseline)
+            actor_loss, critic_loss = agent.update_policy(algorithm=algorithm, baseline=baseline)
 
             state = next_state  # advance to the next state
         # End of episode
 
         ep_rewards.append(ep_reward)
         ep_lengths.append(ep_length)
-        if loss is not None:
-            ep_losses.append(loss)
+        if actor_loss is not None:
+            ep_actor_losses.append(actor_loss)
+
+        if actor_loss is not None:
+            ep_critic_losses.append(critic_loss)
+        
         total_reward += ep_reward
 
         # Every 100 episodes: print progress and check if this is the best model so far
@@ -100,13 +105,14 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
             min_100   = np.min(recent_rewards)
             max_100   = np.max(recent_rewards)
             avg_len   = np.mean(ep_lengths[-100:])
-            avg_loss  = np.mean(ep_losses[-100:]) if ep_losses else float('nan')
+            avg_actor_loss  = np.mean(ep_actor_losses[-100:]) if ep_actor_losses else float('nan')
+            avg_critic_loss  = np.mean(ep_critic_losses[-100:]) if ep_critic_losses else float('nan')
             sigma_eff = F.softplus(policy.sigma).detach().cpu().numpy()
             sigma_history.append((i + 1, sigma_eff.copy()))
             print(
                 f"Ep {i+1:>6}/{num_episodes} | "
                 f"avg: {avg_100:7.1f}  min: {min_100:7.1f}  max: {max_100:7.1f} | "
-                f"len: {avg_len:5.0f} | loss: {avg_loss:8.4f} | "
+                f"len: {avg_len:5.0f} | actor loss: {avg_actor_loss:8.4f} | critic loss: {avg_critic_loss:8.4f} | "
                 f"σ: [{', '.join(f'{s:.3f}' for s in sigma_eff)}] | "
                 f"best: {best_avg_reward:.1f}"
             )
@@ -130,7 +136,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
     # so I can compare runs just by looking at the filenames without loading them.
     final_path = os.path.join(checkpoint_dir, f"{algorithm}_{run_id}_{total_reward:.0f}_{num_episodes}_{total_reward/num_episodes:.1f}.pt")
     torch.save(policy.state_dict(), final_path)
-    return policy, ep_rewards, ep_lengths, ep_losses, sigma_history, final_path
+    return policy, ep_rewards, ep_lengths, ep_actor_losses,ep_critic_losses, sigma_history, final_path
 
 
 def main():
