@@ -51,13 +51,17 @@ class Policy(torch.nn.Module):
         # sigma is a learnable parameter: the network decides how much to explore.
         self.sigma_activation = F.softplus
         init_sigma = 0.5
-        self.sigma = torch.nn.Parameter(torch.zeros(self.action_space)+init_sigma)
+        self.sigma = torch.nn.Parameter(torch.zeros(self.action_space)+init_sigma) #self.sigma = [0.5,0.5,0.5]
 
 
         """
             Critic network
         """
         # TASK 3: critic network for actor-critic algorithm
+        self.fc1_critic = torch.nn.Linear(state_space, self.hidden)
+        self.fc2_critic = torch.nn.Linear(self.hidden, self.hidden)
+        self.fc3_critic = torch.nn.Linear(self.hidden, 1) #V(s) is a scalar function
+
 
 
         self.init_weights()
@@ -70,32 +74,41 @@ class Policy(torch.nn.Module):
                 torch.nn.init.zeros_(m.bias)
 
 
-    def forward(self, x):
+    def forward(self, x, critic=False): #output = (normal_dist, value_func)
         """
             Actor
         """
-        # Pass the state through the 3-layer MLP to get the mean action.
-        # Tanh squashes activations to (-1, 1), which helps training stability.
-        x_actor = self.tanh(self.fc1_actor(x))
-        x_actor = self.tanh(self.fc2_actor(x_actor))
-        action_mean = self.fc3_actor_mean(x_actor)   # shape: (action_space,)
+        if(not critic):
 
-        # Apply softplus to sigma so it is always positive (required for a std dev).
-        sigma = self.sigma_activation(self.sigma)    # shape: (action_space,)
+            # Pass the state through the 3-layer MLP to get the mean action.
+            # Tanh squashes activations to (-1, 1), which helps training stability.
+            x_actor = self.tanh(self.fc1_actor(x))
+            x_actor = self.tanh(self.fc2_actor(x_actor))
+            action_mean = self.fc3_actor_mean(x_actor)   # shape: (action_space,)
 
-        # Build a Gaussian distribution N(action_mean, sigma) over the action space.
-        # Hopper has 3 continuous joints, so this is a 3-dimensional Gaussian
-        # (one independent Normal per joint).
-        normal_dist = Normal(action_mean, sigma)
+            # Apply softplus to sigma so it is always positive (required for a std dev).
+            sigma = self.sigma_activation(self.sigma)    # shape: (action_space,)
 
+            # Build a Gaussian distribution N(action_mean, sigma) over the action space.
+            # Hopper has 3 continuous joints, so this is a 3-dimensional Gaussian
+            # (one independent Normal per joint).
+            normal_dist = Normal(action_mean, sigma)
+            return normal_dist
 
         """
             Critic
         """
-        # TASK 3: forward in the critic network
         
-        
-        return normal_dist
+        if(critic):
+
+            # TASK 3: forward in the critic network
+            # for now the critic NN has the same structure of the actor. The only thing changed
+            # is that the last layer doesn't have an activation. This is because V(s) can go from
+            # +Inf to -Inf
+            x_critic = self.tanh(self.fc1_critic(x))
+            x_critic = self.tanh(self.fc2_critic(x_critic))
+            value_func = self.fc3_critic(x_critic)
+            return value_func
 
 
 class Agent(object):
@@ -120,6 +133,9 @@ class Agent(object):
 
 
     def update_policy(self, algorithm='reinforce', baseline = 0):
+        # the list of states, actions etc... is moved to local variables. The global variables are reset
+        # at each update
+        
         action_log_probs = torch.stack(self.action_log_probs, dim=0).to(self.train_device).squeeze(-1)
         states = torch.stack(self.states, dim=0).to(self.train_device).squeeze(-1)
         next_states = torch.stack(self.next_states, dim=0).to(self.train_device).squeeze(-1)
@@ -152,6 +168,9 @@ class Agent(object):
         #   - compute actor loss and critic loss
         #   - compute gradients and step the optimizer
         #
+        if algorithm == "actor-critic":
+            # computing the bootstrap estimate R_t+1+gamma*V(s_t+1)
+            estimate = 
 
         return        
 
