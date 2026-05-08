@@ -47,6 +47,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    load = input("want to load model? [y/n]\n>")
+    if (load == 'y'):
+        load = True
+    else:
+        load = False
 
     env = gym.make(
         "PandaPush-v3",
@@ -60,75 +65,101 @@ def main() -> None:
 
 
     save_name = f"part2/models/sac_push_{args.sampling_strategy}_{args.env_type}_{args.timesteps // 1000}k"
-    vec_env = DummyVecEnv([lambda : env])
 
 
-    use_gpu = False
-    if use_gpu:
-        device = "cuda" if torch.cuda.is_available() else "xpu" if torch.xpu.is_available() else "cpu"
+
+
+    if (load):
+        model = SAC.load(f"{save_name}.zip")
+
     else:
-        device = "cpu"
+        vec_env = DummyVecEnv([lambda : env])
 
-    model = SAC(
-        policy = "MultiInputPolicy",
-        env = vec_env,
-        device = device,
-        verbose = 1,
-        learning_rate = 1e-3,
-        buffer_size = int(args.timesteps / 2),
-        batch_size = 256,
-        tensorboard_log = f"{save_name}/logs",
-    )
-
-    checkpoint_cb = CheckpointCallback(
-        save_freq = int(args.timesteps / 2),
-        save_path = f"{save_name}/checkpoints",
-        name_prefix = "model",
-    )
-
-    model.learn(
-        total_timesteps = args.timesteps,
-        callback = checkpoint_cb,
-        progress_bar = True,
-    )
-
-
-    model.save(save_name)
-    print(f"Model saved to {save_name}.zip")
-
-
-
-    render = True
-
-    render_env = gym.make(
-        "PandaPush-v3",
-        render_mode="human" if render else "rgb_array",
-        type=args.env_type,
-        reward_type="dense",
-    )
-
-
-    n_episodes = 5
-
-    for ep in range(n_episodes):  
-        state, info = render_env.reset()  # Reset environment to initial state
-        done = False
-        cumsum = 0.0
-
-        while not done:  # Until the episode is over
-            time.sleep(0.02)
-
-            action, _ = model.predict(state, deterministic = True)
-            state, reward, terminated, truncated, _ = render_env.step(action)  # Step the simulator to the next timestep
-            cumsum += reward
-            done = terminated or truncated
-
-            if render:
-                render_env.render()
+        print(torch.cuda.is_available())
+        print(torch.cuda.device_count())
+        print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU")
+        print(torch.version.cuda)
         
-        print(f"\nreturn for episode {ep+1} = {cumsum:.2f}\n")
+        use_gpu = True
+        if use_gpu:
+            device = "cuda" if torch.cuda.is_available() else "xpu" if torch.xpu.is_available() else "cpu"
+        else:
+            device = "cpu"
 
-    render_env.close()
+        model = SAC(
+            policy = "MultiInputPolicy",
+            env = vec_env,
+            device = device,
+            verbose = 1,
+            learning_rate = 1e-3,
+            buffer_size = 200000,
+            batch_size = 256,
+            tensorboard_log = f"{save_name}/logs",
+        )
+
+        checkpoint_cb = CheckpointCallback(
+            save_freq = 200000,
+            save_path = f"{save_name}/checkpoints",
+            name_prefix = "model",
+        )
+
+        model.learn(
+            total_timesteps = args.timesteps,
+            callback = checkpoint_cb,
+            progress_bar = True,
+        )
+
+
+        model.save(save_name)
+        print(f"Model saved to {save_name}.zip")
+
+
+
+
+
+
+
+    
+    render = input("want to render? [y/n]\n>")
+    if (render == 'y'):
+        render = True
+
+        render_env = gym.make(
+            "PandaPush-v3",
+            render_mode="human" if render else "rgb_array",
+            type=args.env_type,
+            reward_type="dense",
+        )
+
+        while (render):
+            n_episodes = int(input("insert n_episodes:\n>"))
+
+            for ep in range(n_episodes):  
+                state, info = render_env.reset()  # Reset environment to initial state
+                done = False
+                cumsum = 0.0
+
+                while not done:  # Until the episode is over
+                    time.sleep(0.02)
+
+                    action, _ = model.predict(state, deterministic = True)
+                    state, reward, terminated, truncated, _ = render_env.step(action)  # Step the simulator to the next timestep
+                    cumsum += reward
+                    done = terminated or truncated
+
+                    if render:
+                        render_env.render()
+                
+                print(f"\nreturn for episode {ep+1} = {cumsum:.2f}\n")
+            
+            render = input("want to render? [y/n]\n>")
+            if (render == 'y'):
+                render = True
+            else:
+                render = False
+
+
+        render_env.close()
 
 
 if __name__ == "__main__":
