@@ -164,15 +164,19 @@ class Agent(object):
             current_state = states[-1]
             next_state = next_states[-1]
             reward = rewards[-1]
-            next_value = self.policy(next_state, critic = True) #calculate V(S_t+1)
-            estimate_value = reward + self.gamma*next_value
+            if done[-1] == False: 
+                next_value = self.policy(next_state, critic = True) #calculate V(S_t+1)
+                estimate_value = reward + self.gamma*next_value
+            else:
+                # if we are in the terminal state we should't be able to compute V(S_t+1)
+                # Therefore we assume it to be 0
+                estimate_value = reward
 
             #compute the advantage δ_t
             value = self.policy(current_state, critic = True) #V(S_t)
             delta = estimate_value.detach() - value
 
             #compute actor and critic loss
-            #print(action_log_probs)
             current_action_log_prob = action_log_probs
             delta_detached = delta.detach()
             actor_loss = -delta_detached* current_action_log_prob
