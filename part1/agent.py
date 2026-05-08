@@ -157,6 +157,7 @@ class Agent(object):
             actor_loss.backward()
             self.optimizer.step()
             self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
+            return actor_loss.item()
         
         elif algorithm=='actor_critic':
             #computing bootstrapped estimate, aka R_t+1 + gamma V(S_t+1)
