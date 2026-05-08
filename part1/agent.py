@@ -74,7 +74,7 @@ class Policy(torch.nn.Module):
                 torch.nn.init.zeros_(m.bias)
 
 
-    def forward(self, x, critic=False): #output = (normal_dist, value_func)
+    def forward(self, x, critic=False): 
         """
             Actor
         """
@@ -157,7 +157,37 @@ class Agent(object):
             actor_loss.backward()
             self.optimizer.step()
             self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
-        elif algorithm=='actor':
+        
+        elif algorithm=='actor_critic':
+            #computing bootstrapped estimate, aka R_t+1 + gamma V(S_t+1)
+            current_state = states[-1]
+            next_state = next_states[-1]
+            reward = rewards[-1]
+            next_value = self.policy(next_state, critic = True) #calculate V(S_t+1)
+            estimate_value = reward + self.gamma*next_value
+
+            #compute the advantage δ_t
+            value = self.policy(current_state, critic = True) #V(S_t)
+            delta = estimate_value.detach() - value
+
+            #compute actor and critic loss
+            #print(action_log_probs)
+            current_action_log_prob = action_log_probs
+            delta_detached = delta.detach()
+            actor_loss = -delta_detached* current_action_log_prob
+
+            critic_loss = 0.5 * delta**2
+
+            #compute the gradients
+            self.optimizer.zero_grad() #puts to 0 the gradients. If not used it would be grad = old_grad+new_grad
+
+            actor_loss.backward()
+            critic_loss.backward()
+
+            #step the gradient
+            self.optimizer.step()
+
+            #reset the lists after each iteration of the episode
             self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
 
 
@@ -168,9 +198,6 @@ class Agent(object):
         #   - compute actor loss and critic loss
         #   - compute gradients and step the optimizer
         #
-        if algorithm == "actor-critic":
-            # computing the bootstrap estimate R_t+1+gamma*V(s_t+1)
-            estimate = 
 
         return        
 
@@ -216,6 +243,7 @@ class Agent(object):
             # normal_dist.log_prob(action) gives [log p(a[0]), log p(a[1]), log p(a[2])],
             # and .sum() collapses them into a single scalar log π(a|s).
             action_log_prob = normal_dist.log_prob(action).sum()
+            #print(action_log_prob)
 
             return action, action_log_prob
 
