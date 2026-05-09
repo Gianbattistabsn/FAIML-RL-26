@@ -149,7 +149,11 @@ class Agent(object):
         G_t = discount_rewards(rewards, self.gamma)
         #   - compute policy gradient loss function given actions and returns
         if algorithm == 'reinforce' and done[-1] == True:
-            actor_loss = (- (G_t - baseline) * action_log_probs).mean()
+            if baseline == 0:
+                # Whitening: normalise G_t to zero mean, unit std within the episode.
+                # Makes gradient scale consistent regardless of absolute reward magnitude.
+                G_t = (G_t - G_t.mean()) / (G_t.std() + 1e-8)
+            actor_loss = (-(G_t - baseline) * action_log_probs).mean()
             # The minus sign turns gradient descent into gradient ascent,
             # since we want to MAXIMISE expected return.
 
