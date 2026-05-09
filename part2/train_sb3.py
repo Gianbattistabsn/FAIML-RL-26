@@ -16,6 +16,7 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback, BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import VecNormalize
 
 import time
 import torch
@@ -262,19 +263,28 @@ def main() -> None:
                 n_envs=4
             )
 
+            vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
+            vec_env.training = True
+            vec_env.norm_reward = True
+
             model = PPO(
                 policy="MultiInputPolicy",
                 env=vec_env,
                 device=device,
                 verbose=1,
-                learning_rate=7e-5,
-                n_steps=2048,
+
+                learning_rate=1e-4,
+                n_steps=1024,
                 batch_size=256,
                 n_epochs=10,
-                clip_range=0.1,
+
                 gamma=0.99,
                 gae_lambda=0.95,
-                ent_coef=0.001,
+
+                clip_range=0.2,
+                ent_coef=0.005,
+
+                normalize_advantage=True,
                 tensorboard_log=f"{save_name}/logs",
             )
 
@@ -293,7 +303,22 @@ def main() -> None:
 
 
         else:
-            vec_env = DummyVecEnv([lambda : env])
+            vec_env = make_vec_env(
+                lambda: gym.make(
+                    "PandaPush-v3",
+                    render_mode="rgb_array",
+                    type=args.env_type,
+                    reward_type="dense",
+                ),
+                n_envs=4,   # good default for SAC on robotics
+            )
+
+            # Optional but HIGHLY recommended for stability
+            vec_env = VecNormalize(
+                vec_env,
+                norm_obs=True,
+                norm_reward=False,  # keep reward stable for SAC
+            )
 
             model = SAC(
                 policy="MultiInputPolicy",
@@ -306,6 +331,15 @@ def main() -> None:
                 ent_coef="auto",        # keep fixed
                 gamma=0.99,          # keep default
                 tau=0.005,           # keep default
+                ent_coef = "auto",        # keep fixed
+                train_freq = 1,
+                gradient_steps = 1,
+                learning_starts = 10_000,
+
+                policy="MultiInputPolicy",
+                env=vec_env,
+                device=device,
+                verbose=1,
                 tensorboard_log=f"{save_name}/logs",
                 learning_starts=1000,         # inizia ad apprendere dopo 1000 passi (esplorazione iniziale)
                 train_freq=1,                 # esegui un aggiornamento ad ogni step ambientale
