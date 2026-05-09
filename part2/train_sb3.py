@@ -389,7 +389,7 @@ def main() -> None:
                 done = False
                 cumsum = 0.0
                 print(f"\n--- Episode {ep+1}/{n_episodes} ---")
-                time.sleep(1.0) 
+                time.sleep(0.5) 
 
                 while not done:  # Until the episode is over
                     time.sleep(1/30)
