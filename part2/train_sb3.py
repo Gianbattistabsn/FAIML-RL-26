@@ -3,7 +3,19 @@
 # -------------- WITH WANDB ---------
 #run comand: python .\part2\train_sb3.py --env-type source --sampling-strategy none --timesteps 500000
 #run comand: python .\part2\train_sb3.py --env-type source --sampling-strategy none --timesteps 50000
+
+"""
+with normalization
+python .\part2\train_sb3.py --env-type source --sampling-strategy none --timesteps 300000
+
+# without normalization
+python .\part2\train_sb3.py --env-type source --sampling-strategy none --timesteps 300000 --no-vecnormalize
+
+"""
+
+
 import argparse
+import os
 from collections import deque
 
 import gymnasium as gym
@@ -134,6 +146,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable W&B logging",
     )
+    parser.add_argument(
+        "--no-vecnormalize",
+        action="store_true",
+        help="Disable VecNormalize during training (observation normalization)",
+    )
     return parser.parse_args()
 
 
@@ -175,10 +192,24 @@ def main() -> None:
 
 
     if load:
-        if use_PPO:
-            model = PPO.load(f"{save_name}.zip")
+        load_vec_env = make_vec_env(
+            lambda: gym.make("PandaPush-v3", render_mode="rgb_array",
+                             type=args.env_type, reward_type="dense"),
+            n_envs=1,
+        )
+        vecnorm_path = f"{save_name}_vecnormalize.pkl"
+        if os.path.exists(vecnorm_path):
+            load_vec_env = VecNormalize.load(vecnorm_path, load_vec_env)
+            load_vec_env.training = False
+            load_vec_env.norm_reward = False
+            print(f"VecNormalize stats caricate da {vecnorm_path}")
         else:
-            model = SAC.load(f"{save_name}.zip")
+            print(f"[WARNING] {vecnorm_path} non trovato, modello caricato senza normalizzazione")
+
+        if use_PPO:
+            model = PPO.load(f"{save_name}.zip", env=load_vec_env)
+        else:
+            model = SAC.load(f"{save_name}.zip", env=load_vec_env)
 
 
     else:
@@ -218,18 +249,17 @@ def main() -> None:
             })
         else:
             base_config.update({
-                "learning_rate": 5e-4,
+                "learning_rate": 3e-4,
                 "buffer_size": int(1e6),
                 "batch_size": 256,
                 "ent_coef": "auto",
-                "gamma": 0.99,
+                "gamma": 0.98,
                 "tau": 0.005,
-                "learning_starts": 1000,
+                "learning_starts": 10_000,
                 "train_freq": 1,
-                "gradient_steps": 1,
-                "net_arch": [256, 256, 256],
-                "activation_fn": "ReLU",
-                "share_features_extractor": True,
+                "gradient_steps": 4,
+                "n_envs": 4,
+                "vec_normalize": True,
             })
 
         if not args.no_wandb:
@@ -263,9 +293,10 @@ def main() -> None:
                 n_envs=4
             )
 
-            vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
-            vec_env.training = True
-            vec_env.norm_reward = True
+            if not args.no_vecnormalize:
+                vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
+                vec_env.training = True
+                vec_env.norm_reward = True
 
             model = PPO(
                 policy="MultiInputPolicy",
@@ -314,33 +345,32 @@ def main() -> None:
             )
 
             # Optional but HIGHLY recommended for stability
-            vec_env = VecNormalize(
-                vec_env,
-                norm_obs=True,
-                norm_reward=False,  # keep reward stable for SAC
-            )
+            if not args.no_vecnormalize:
+                vec_env = VecNormalize(
+                    vec_env,
+                    norm_obs=True,
+                    norm_reward=False,  # keep reward stable for SAC
+                )
 
             model = SAC(
                 policy="MultiInputPolicy",
                 env=vec_env,
                 device=device,
                 verbose=1,
-                learning_rate=5e-4,
-                buffer_size=int(1e6),
+
+                learning_rate=3e-4,          
+                buffer_size=int(1e6),        
                 batch_size=256,
+
                 ent_coef="auto",
-                gamma=0.99,
+                gamma=0.98,
                 tau=0.005,
+
+                learning_starts=10_000,
                 train_freq=1,
-                gradient_steps=1,
-                learning_starts=1000,
-                target_entropy="auto",
+                gradient_steps=4,            
+
                 tensorboard_log=f"{save_name}/logs",
-                policy_kwargs=dict(
-                    net_arch=[256, 256, 256],
-                    activation_fn=torch.nn.ReLU,
-                    share_features_extractor=True,
-                ),
             )
 
             checkpoint_cb = CheckpointCallback(
@@ -358,6 +388,8 @@ def main() -> None:
 
 
         model.save(save_name)
+        if not args.no_vecnormalize and isinstance(vec_env, VecNormalize):
+            vec_env.save(f"{save_name}_vecnormalize.pkl")
         print(f"Model saved to {save_name}.zip")
 
         if not args.no_wandb:
@@ -372,45 +404,49 @@ def main() -> None:
     
     render = input("want to render? [y/n]\n>")
     if (render == 'y'):
-        render = True
 
-        render_env = gym.make(
+        env_type_render = args.env_type
+        render_env = DummyVecEnv([lambda: gym.make(
             "PandaPush-v3",
-            render_mode="human" if render else "rgb_array",
-            type=args.env_type,
+            render_mode="human",
+            type=env_type_render,
             reward_type="dense",
-        )
+        )])
 
-        while (render):
+        # Carica le stats di normalizzazione salvate durante il training
+        vecnorm_path = f"{save_name}_vecnormalize.pkl"
+        if os.path.exists(vecnorm_path):
+            render_env = VecNormalize.load(vecnorm_path, render_env)
+            render_env.training = False    # non aggiorna le stats durante eval
+            render_env.norm_reward = False  # non normalizzare reward in eval
+            print(f"VecNormalize stats caricate da {vecnorm_path}")
+        else:
+            print(f"[WARNING] {vecnorm_path} non trovato, rendering senza normalizzazione")
+
+        render = True
+        while render:
             n_episodes = int(input("insert n_episodes:\n>"))
 
-            for ep in range(n_episodes):  
-                state, info = render_env.reset()  # Reset environment to initial state
+            for ep in range(n_episodes):
+                obs = render_env.reset()
                 done = False
                 cumsum = 0.0
                 print(f"\n--- Episode {ep+1}/{n_episodes} ---")
-                time.sleep(0.5) 
+                time.sleep(0.5)
 
-                while not done:  # Until the episode is over
+                while not done:
                     time.sleep(1/30)
 
-                    action, _ = model.predict(state, deterministic = True)
-                    state, reward, terminated, truncated, _ = render_env.step(action)  # Step the simulator to the next timestep
-                    cumsum += reward
-                    done = terminated or truncated
+                    action, _ = model.predict(obs, deterministic=True)
+                    obs, reward, dones, infos = render_env.step(action)
+                    cumsum += float(reward[0])
+                    done = bool(dones[0])
 
-                    if render:
-                        render_env.render()
-                
                 print(f"return for episode {ep+1} = {cumsum:.2f}")
-                time.sleep(2.0)  # pausa dopo l'episodio per leggere il risultato
-            
-            render = input("want to render? [y/n]\n>")
-            if (render == 'y'):
-                render = True
-            else:
-                render = False
+                time.sleep(2.0)
 
+            render = input("want to render? [y/n]\n>")
+            render = (render == 'y')
 
         render_env.close()
 

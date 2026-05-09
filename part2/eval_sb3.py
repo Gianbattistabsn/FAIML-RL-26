@@ -1,5 +1,11 @@
 #run comand: python .\part2\eval_sb3.py --model-path ./part2/models/ppo_push_none_source_700k.zip --episodes 30 --stochastic --render --env-type target
+"""
+# with normalization (default)
+python .\part2\eval_sb3.py --model-path ./part2/models/sac_push_none_source_300k.zip --episodes 30 --render
 
+# without normalization
+python .\part2\eval_sb3.py --model-path ./part2/models/sac_push_none_source_300k.zip --episodes 30 --render --no-vecnormalize
+"""
 
 import argparse
 import os
@@ -8,10 +14,11 @@ import time
 import gymnasium as gym
 import numpy as np
 from stable_baselines3 import SAC, PPO
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import panda_gym  # noqa: F401 - required so Panda envs are registered
 
 
-def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool, env_type: str) -> None:
+def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool, env_type: str, use_vecnormalize: bool = True) -> None:
     if not os.path.exists(model_path):
         raise FileNotFoundError(
             f"Model file not found: {model_path}. "
@@ -19,34 +26,47 @@ def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool
         )
 
     render_mode = "human" if render else "rgb_array"
-    env = gym.make("PandaPush-v3", render_mode=render_mode, type=env_type, reward_type="dense")
+    env = DummyVecEnv([lambda: gym.make("PandaPush-v3", render_mode=render_mode, type=env_type, reward_type="dense")])
 
+    # Auto-detect VecNormalize stats (.pkl) from model path
+    vecnorm_path = model_path.replace(".zip", "_vecnormalize.pkl")
+    if not vecnorm_path.endswith("_vecnormalize.pkl"):
+        vecnorm_path = model_path + "_vecnormalize.pkl"
+    if use_vecnormalize and os.path.exists(vecnorm_path):
+        env = VecNormalize.load(vecnorm_path, env)
+        env.training = False
+        env.norm_reward = False
+        print(f"VecNormalize stats caricate da {vecnorm_path}")
+    elif use_vecnormalize:
+        print(f"[WARNING] {vecnorm_path} non trovato, eval senza normalizzazione")
+    else:
+        print("VecNormalize disabilitata (--no-vecnormalize)")
 
     if "ppo" in model_path:
-        model = PPO.load(f"{model_path}")
+        model = PPO.load(model_path, env=env)
     else:
-        model = SAC.load(f"{model_path}")
+        model = SAC.load(model_path, env=env)
 
     episode_returns = []
     successes = []
 
     for episode in range(1, n_episodes + 1):
-        obs, info = env.reset()
-        terminated = False
-        truncated = False
+        obs = env.reset()
+        done = False
         episode_return = 0.0
-        print(f"\n--- Episode {episode+1}/{n_episodes} ---")
-        time.sleep(0.5) 
-        while not (terminated or truncated):
+        print(f"\n--- Episode {episode}/{n_episodes} ---")
+        time.sleep(0.5)
+        while not done:
             time.sleep(1/30)
-            action,_ = model.predict(obs, deterministic = True)
-            obs, reward, terminated, truncated, info = env.step(action)
-            episode_return += float(reward)
+            action, _ = model.predict(obs, deterministic=deterministic)
+            obs, reward, dones, infos = env.step(action)
+            episode_return += float(reward[0])
+            done = bool(dones[0])
 
         episode_returns.append(episode_return)
 
-        if isinstance(info, dict) and "is_success" in info:
-            successes.append(float(info["is_success"]))
+        if infos and "is_success" in infos[0]:
+            successes.append(float(infos[0]["is_success"]))
 
         print(f"Episode {episode:03d} | return = {episode_return:.3f}")
 
@@ -95,6 +115,11 @@ def parse_args() -> argparse.Namespace:
         choices=["source", "target"],
         help="Type of environment to evaluate on (default: target)",
     )
+    parser.add_argument(
+        "--no-vecnormalize",
+        action="store_true",
+        help="Disable VecNormalize (skip loading the .pkl stats file)",
+    )
     return parser.parse_args()
 
 
@@ -106,4 +131,5 @@ if __name__ == "__main__":
         deterministic=not args.stochastic,
         render=args.render,
         env_type=args.env_type,
+        use_vecnormalize=not args.no_vecnormalize,
     )
