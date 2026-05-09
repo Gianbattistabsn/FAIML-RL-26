@@ -157,7 +157,7 @@ class Agent(object):
             actor_loss.backward()
             self.optimizer.step()
             self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
-            return actor_loss.item()
+            return actor_loss.item(), actor_loss.item()
         
         elif algorithm=='actor_critic':
             #computing bootstrapped estimate, aka R_t+1 + gamma V(S_t+1)
@@ -179,24 +179,34 @@ class Agent(object):
             #compute actor and critic loss
             current_action_log_prob = action_log_probs
             delta_detached = delta.detach()
-            actor_loss = -delta_detached* current_action_log_prob
+            actor_loss = -delta_detached* current_action_log_prob 
 
             critic_loss = 0.5 * delta**2
+
+            #Saving the current values of the losses, needed for the train analysis
+            actor_loss_value = actor_loss.item()
+            critic_loss_value = critic_loss.item()
 
             #compute the gradients
             self.optimizer.zero_grad() #puts to 0 the gradients. If not used it would be grad = old_grad+new_grad
 
-            actor_loss.backward()
             critic_loss.backward()
 
             #step the gradient
             self.optimizer.step()
 
+            self.optimizer.zero_grad() 
+
+            actor_loss.backward()
+
+            self.optimizer.step()
+
             #reset the lists after each iteration of the episode
             self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
 
-        return None
-
+            return actor_loss_value, critic_loss_value
+        
+        return None, None
 
     def get_action(self, state, evaluation=False):
         """Given the current state, return an action and its log-probability.
