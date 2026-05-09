@@ -193,7 +193,7 @@ def main() -> None:
         else:
             device = "cpu"
         print("xpu available", torch.xpu.is_available())
-        device = 'xpu'
+        
         print("using", device)
 
         # --- W&B setup ---
