@@ -28,7 +28,10 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
     # Fix seeds so results are reproducible across runs
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.xpu.manual_seed_all(seed)
+    try:
+        torch.xpu.manual_seed_all(seed)
+    except AttributeError:
+        pass  # Intel XPU not available on this machine
     np.random.seed(seed)
     random.seed(seed)
 
@@ -80,10 +83,19 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
             # Store this transition so update_policy() can use it for the gradient update.
             agent.store_outcome(state, next_state, action_log_prob, reward, done)
 
+            # Resolve the actual baseline value to pass down:
+            #   baseline == -1  → adaptive: moving average of last 100 episode returns
+            #   baseline ==  0  → G_t whitening (handled inside update_policy)
+            #   baseline  >  0  → fixed constant subtraction
+            if baseline:
+                actual_baseline = float(np.mean(ep_rewards[-100:])) if ep_rewards else baseline
+            else:
+                actual_baseline = baseline
+
             # update_policy() is called every step, but the actual gradient update
             # only fires when done=True (end of episode) because REINFORCE is Monte Carlo:
             # it needs the full trajectory to compute the return G_t.
-            actor_loss, critic_loss = agent.update_policy(algorithm=algorithm, baseline=baseline)
+            actor_loss, critic_loss = agent.update_policy(algorithm=algorithm, baseline=actual_baseline)
 
             state = next_state  # advance to the next state
         # End of episode
