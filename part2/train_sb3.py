@@ -1,5 +1,5 @@
 #run comand: python .\part2\train_sb3.py --env-type source --sampling-strategy none --timesteps 500000
-#run comand: python .\part2\train_sb3.py --env-type source --sampling-strategy none --timesteps 5000
+#run comand: python .\part2\train_sb3.py --env-type source --sampling-strategy none --timesteps 50000
 
 
 import argparse
@@ -45,13 +45,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+
+
+
 def main() -> None:
     args = parse_args()
-    load = input("want to load model? [y/n]\n>")
-    if (load == 'y'):
-        load = True
+
+    use_PPO = input("use PPO? [y/n]\n>")
+    if (use_PPO == 'y'):
+        use_PPO = True
+        alg = "ppo"
     else:
-        load = False
+        use_PPO = False
+        alg = "sac"
+
 
     env = gym.make(
         "PandaPush-v3",
@@ -64,17 +71,25 @@ def main() -> None:
         env = RandomizationWrapper(env, sampling_strategy = args.sampling_strategy)
 
 
-    save_name = f"part2/models/sac_push_{args.sampling_strategy}_{args.env_type}_{args.timesteps // 1000}k"
+    save_name = f"part2/models/{alg}_push_{args.sampling_strategy}_{args.env_type}_{args.timesteps // 1000}k"
+
+
+    load = input("want to load model? [y/n]\n>")
+    if (load == 'y'):
+        load = True
+    else:
+        load = False
 
 
 
+    if load:
+        if use_PPO:
+            model = PPO.load(f"{save_name}.zip")
+        else:
+            model = SAC.load(f"{save_name}.zip")
 
-    if (load):
-        model = SAC.load(f"{save_name}.zip")
 
     else:
-        vec_env = DummyVecEnv([lambda : env])
-
         print(torch.cuda.is_available())
         print(torch.cuda.device_count())
         print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU")
@@ -86,28 +101,74 @@ def main() -> None:
         else:
             device = "cpu"
 
-        model = SAC(
-            policy = "MultiInputPolicy",
-            env = vec_env,
-            device = device,
-            verbose = 1,
-            learning_rate = 1e-3,
-            buffer_size = 200000,
-            batch_size = 256,
-            tensorboard_log = f"{save_name}/logs",
-        )
+        if (use_PPO):
+            vec_env = make_vec_env(
+                lambda: gym.make(
+                    "PandaPush-v3",
+                    render_mode="rgb_array",
+                    type=args.env_type,
+                    reward_type="dense",
+                ),
+                n_envs=4
+            )
 
-        checkpoint_cb = CheckpointCallback(
-            save_freq = 200000,
-            save_path = f"{save_name}/checkpoints",
-            name_prefix = "model",
-        )
+            model = PPO(
+                policy="MultiInputPolicy",
+                env=vec_env,
+                device=device,
+                verbose=1,
+                learning_rate=7e-5,
+                n_steps=2048,
+                batch_size=256,
+                n_epochs=10,
+                clip_range=0.1,
+                gamma=0.99,
+                gae_lambda=0.95,
+                ent_coef=0.001,
+                tensorboard_log=f"{save_name}/logs",
+            )
 
-        model.learn(
-            total_timesteps = args.timesteps,
-            callback = checkpoint_cb,
-            progress_bar = True,
-        )
+            checkpoint_cb = CheckpointCallback(
+                save_freq = 200000,
+                save_path = f"{save_name}/checkpoints",
+                name_prefix = "model",
+            )
+
+            model.learn(
+                total_timesteps = args.timesteps,
+                callback = checkpoint_cb,
+                progress_bar = True,
+            )
+
+
+        else:
+            vec_env = DummyVecEnv([lambda : env])
+
+            model = SAC(
+                policy="MultiInputPolicy",
+                env=vec_env,
+                device=device,
+                verbose=1,
+                learning_rate=3e-4,
+                buffer_size=int(1e6),
+                batch_size=256,
+                ent_coef=0.1,        # keep fixed
+                gamma=0.99,          # keep default
+                tau=0.005,           # keep default
+                tensorboard_log=f"{save_name}/logs",
+            )
+
+            checkpoint_cb = CheckpointCallback(
+                save_freq = 200000,
+                save_path = f"{save_name}/checkpoints",
+                name_prefix = "model",
+            )
+
+            model.learn(
+                total_timesteps = args.timesteps,
+                callback = checkpoint_cb,
+                progress_bar = True,
+            )
 
 
         model.save(save_name)
