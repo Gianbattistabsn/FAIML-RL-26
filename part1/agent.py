@@ -142,8 +142,11 @@ class Agent(object):
         rewards = torch.stack(self.rewards, dim=0).to(self.train_device).squeeze(-1)
         done = torch.Tensor(self.done).to(self.train_device)
 
-
-        
+        if baseline > 0:
+            baseline_vector = baseline * np.exp(-20 * np.arange(rewards.shape[0]) / rewards.shape[0])
+        else:
+            baseline_vector = 0
+            
         # TASK 2:
         #   - compute discounted returns
         G_t = discount_rewards(rewards, self.gamma)
@@ -153,7 +156,7 @@ class Agent(object):
                 # Whitening: normalise G_t to zero mean, unit std within the episode.
                 # Makes gradient scale consistent regardless of absolute reward magnitude.
                 G_t = (G_t - G_t.mean()) / (G_t.std() + 1e-8)
-            actor_loss = (-(G_t - baseline) * action_log_probs).mean()
+            actor_loss = (-(G_t - baseline_vector) * action_log_probs).mean()
             # The minus sign turns gradient descent into gradient ascent,
             # since we want to MAXIMISE expected return.
 
