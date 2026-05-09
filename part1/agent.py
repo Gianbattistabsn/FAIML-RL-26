@@ -88,6 +88,7 @@ class Policy(torch.nn.Module):
 
             # Apply softplus to sigma so it is always positive (required for a std dev).
             sigma = self.sigma_activation(self.sigma)    # shape: (action_space,)
+            # we never have the case where sigma = 0.5, because we immediately do softplus(0.5) which is equal to 0.9
 
             # Build a Gaussian distribution N(action_mean, sigma) over the action space.
             # Hopper has 3 continuous joints, so this is a 3-dimensional Gaussian
@@ -122,7 +123,7 @@ class Agent(object):
             self.train_device = 'cpu'
         
         self.policy = policy.to(self.train_device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
 
         self.gamma = 0.99
         self.states = []
@@ -268,4 +269,3 @@ class Agent(object):
         self.action_log_probs.append(action_log_prob)  # keeps the computation graph alive
         self.rewards.append(torch.Tensor([reward]))
         self.done.append(done)
-
