@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import time
 
 import gymnasium as gym
 import numpy as np
@@ -34,8 +35,10 @@ def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool
         terminated = False
         truncated = False
         episode_return = 0.0
-
+        print(f"\n--- Episode {episode+1}/{n_episodes} ---")
+        time.sleep(0.5) 
         while not (terminated or truncated):
+            time.sleep(1/30)
             action,_ = model.predict(obs, deterministic = True)
             obs, reward, terminated, truncated, info = env.step(action)
             episode_return += float(reward)

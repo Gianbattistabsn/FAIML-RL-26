@@ -388,9 +388,11 @@ def main() -> None:
                 state, info = render_env.reset()  # Reset environment to initial state
                 done = False
                 cumsum = 0.0
+                print(f"\n--- Episode {ep+1}/{n_episodes} ---")
+                time.sleep(1.0) 
 
                 while not done:  # Until the episode is over
-                    time.sleep(0.02)
+                    time.sleep(1/30)
 
                     action, _ = model.predict(state, deterministic = True)
                     state, reward, terminated, truncated, _ = render_env.step(action)  # Step the simulator to the next timestep
@@ -400,7 +402,8 @@ def main() -> None:
                     if render:
                         render_env.render()
                 
-                print(f"\nreturn for episode {ep+1} = {cumsum:.2f}\n")
+                print(f"return for episode {ep+1} = {cumsum:.2f}")
+                time.sleep(2.0)  # pausa dopo l'episodio per leggere il risultato
             
             render = input("want to render? [y/n]\n>")
             if (render == 'y'):
