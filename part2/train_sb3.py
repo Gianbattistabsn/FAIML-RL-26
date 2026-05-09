@@ -328,30 +328,19 @@ def main() -> None:
                 learning_rate=5e-4,
                 buffer_size=int(1e6),
                 batch_size=256,
-                ent_coef="auto",        # keep fixed
-                gamma=0.99,          # keep default
-                tau=0.005,           # keep default
-                ent_coef = "auto",        # keep fixed
-                train_freq = 1,
-                gradient_steps = 1,
-                learning_starts = 10_000,
-
-                policy="MultiInputPolicy",
-                env=vec_env,
-                device=device,
-                verbose=1,
+                ent_coef="auto",
+                gamma=0.99,
+                tau=0.005,
+                train_freq=1,
+                gradient_steps=1,
+                learning_starts=1000,
+                target_entropy="auto",
                 tensorboard_log=f"{save_name}/logs",
-                learning_starts=1000,         # inizia ad apprendere dopo 1000 passi (esplorazione iniziale)
-                train_freq=1,                 # esegui un aggiornamento ad ogni step ambientale
-                gradient_steps=1,             # un gradiente per train_freq
-                target_entropy="auto",        # se non usi ent_coef="auto", puoi settare manualmente (es. -dim_action)
-                
-                # Architettura delle reti (fondamentale per input a dizionario)
                 policy_kwargs=dict(
-                    net_arch=[256, 256, 256],       # tre layer nascosti da 256 neuroni
-                    activation_fn=torch.nn.ReLU,    # attivazione standard
-                    share_features_extractor=True
-                )
+                    net_arch=[256, 256, 256],
+                    activation_fn=torch.nn.ReLU,
+                    share_features_extractor=True,
+                ),
             )
 
             checkpoint_cb = CheckpointCallback(
