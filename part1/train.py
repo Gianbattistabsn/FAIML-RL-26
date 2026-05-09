@@ -87,8 +87,8 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
             #   baseline == -1  → adaptive: moving average of last 100 episode returns
             #   baseline ==  0  → G_t whitening (handled inside update_policy)
             #   baseline  >  0  → fixed constant subtraction
-            if baseline == -1:
-                actual_baseline = float(np.mean(ep_rewards[-100:])) if ep_rewards else 0.0
+            if baseline:
+                actual_baseline = float(np.mean(ep_rewards[-100:])) if ep_rewards else baseline
             else:
                 actual_baseline = baseline
 
