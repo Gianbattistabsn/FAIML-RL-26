@@ -237,15 +237,18 @@ def main() -> None:
         }
         if use_PPO:
             base_config.update({
-                "learning_rate": 7e-5,
+                "learning_rate": 3e-4,
                 "n_steps": 2048,
-                "batch_size": 256,
+                "batch_size": 512,
                 "n_epochs": 10,
-                "clip_range": 0.1,
+                "clip_range": 0.2,
                 "gamma": 0.99,
                 "gae_lambda": 0.95,
-                "ent_coef": 0.001,
-                "n_envs": 4,
+                "ent_coef": 0.05,
+                "vf_coef": 0.5,
+                "max_grad_norm": 0.5,
+                "normalize_advantage": True,
+                "n_envs": 8,
             })
         else:
             base_config.update({
@@ -290,13 +293,13 @@ def main() -> None:
                     type=args.env_type,
                     reward_type="dense",
                 ),
-                n_envs=4
+                n_envs=8
             )
 
             if not args.no_vecnormalize:
-                vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
+                vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=False)
                 vec_env.training = True
-                vec_env.norm_reward = True
+                vec_env.norm_reward = False
 
             model = PPO(
                 policy="MultiInputPolicy",
@@ -304,16 +307,18 @@ def main() -> None:
                 device=device,
                 verbose=1,
 
-                learning_rate=1e-4,
-                n_steps=1024,
-                batch_size=256,
+                learning_rate=3e-4,
+                n_steps=2048,
+                batch_size=512,
                 n_epochs=10,
 
                 gamma=0.99,
                 gae_lambda=0.95,
 
                 clip_range=0.2,
-                ent_coef=0.005,
+                ent_coef=0.05,
+                vf_coef=0.5,
+                max_grad_norm=0.5,
 
                 normalize_advantage=True,
                 tensorboard_log=f"{save_name}/logs",
