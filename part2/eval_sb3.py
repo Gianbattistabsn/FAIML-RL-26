@@ -54,7 +54,8 @@ def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool
         print(f"\n{'='*40}")
         print(f"  Episode {episode} / {n_episodes}")
         print(f"{'='*40}")
-        time.sleep(1.0)
+        if render:
+            time.sleep(0.5)
 
         obs = env.reset()
         done = False
@@ -70,14 +71,15 @@ def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool
 
             if step % 20 == 0:
                 print(f"  step={step:4d}  cumulative_reward={episode_return:7.3f}", flush=True)
-
-            time.sleep(0.2)
+            if render:
+                time.sleep(0.2)
 
         success = infos[0].get("is_success", None) if infos else None
         success_str = f"  success={bool(success)}" if success is not None else ""
         print(f"\n  Episode {episode} done — steps={step}  return={episode_return:.3f}{success_str}")
         print(f"{'='*40}")
-        time.sleep(1.0)
+        if render:
+            time.sleep(0.5)
 
         episode_returns.append(episode_return)
 
