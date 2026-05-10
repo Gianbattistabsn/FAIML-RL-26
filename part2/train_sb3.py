@@ -237,17 +237,18 @@ def main() -> None:
         }
         if use_PPO:
             base_config.update({
-                "learning_rate": 3e-4,
-                "n_steps": 2048,
+                "learning_rate": 5e-4,
+                "n_steps": 4096,
                 "batch_size": 512,
-                "n_epochs": 10,
-                "clip_range": 0.2,
-                "gamma": 0.99,
+                "n_epochs": 8,
+                "clip_range": 0.15,
+                "gamma": 0.995,
                 "gae_lambda": 0.95,
-                "ent_coef": 0.05,
+                "ent_coef": 0.005,
                 "vf_coef": 0.5,
                 "max_grad_norm": 0.5,
                 "normalize_advantage": True,
+                "norm_reward": True,
                 "n_envs": 8,
             })
         else:
@@ -297,9 +298,9 @@ def main() -> None:
             )
 
             if not args.no_vecnormalize:
-                vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=False)
+                vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
                 vec_env.training = True
-                vec_env.norm_reward = False
+                vec_env.norm_reward = True
 
             model = PPO(
                 policy="MultiInputPolicy",
@@ -307,16 +308,16 @@ def main() -> None:
                 device=device,
                 verbose=1,
 
-                learning_rate=3e-4,
-                n_steps=2048,
+                learning_rate=5e-4,
+                n_steps=4096,
                 batch_size=512,
-                n_epochs=10,
+                n_epochs=8,
 
-                gamma=0.99,
+                gamma=0.995,
                 gae_lambda=0.95,
 
-                clip_range=0.2,
-                ent_coef=0.05,
+                clip_range=0.15,
+                ent_coef=0.005,
                 vf_coef=0.5,
                 max_grad_norm=0.5,
 
