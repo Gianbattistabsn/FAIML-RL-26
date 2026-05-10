@@ -6,10 +6,10 @@
 
 """
 with normalization
-python .\part2\train_sb3.py --env-type source --sampling-strategy none --timesteps 300000
+python part2/train_sb3.py --env-type source --sampling-strategy none --timesteps 300000
 
 # without normalization
-python .\part2\train_sb3.py --env-type source --sampling-strategy none --timesteps 300000 --no-vecnormalize
+python part2/train_sb3.py --env-type source --sampling-strategy none --timesteps 300000 --no-vecnormalize
 
 """
 
@@ -428,24 +428,35 @@ def main() -> None:
             n_episodes = int(input("insert n_episodes:\n>"))
 
             for ep in range(n_episodes):
+                print(f"\n{'='*40}")
+                print(f"  Episode {ep+1} / {n_episodes}")
+                print(f"{'='*40}")
+                time.sleep(1)  # pause before reset
+
                 obs = render_env.reset()
                 done = False
                 cumsum = 0.0
-                print(f"\n--- Episode {ep+1}/{n_episodes} ---")
-                time.sleep(0.5)
+                step = 0
 
                 while not done:
-                    time.sleep(1/30)
-
                     action, _ = model.predict(obs, deterministic=True)
                     obs, reward, dones, infos = render_env.step(action)
                     cumsum += float(reward[0])
+                    step += 1
                     done = bool(dones[0])
 
-                print(f"return for episode {ep+1} = {cumsum:.2f}")
-                time.sleep(2.0)
+                    if step % 20 == 0:
+                        print(f"  step={step:4d}  cumulative_reward={cumsum:7.3f}", flush=True)
 
-            render = input("want to render? [y/n]\n>")
+                    time.sleep(0.2)
+
+                success = infos[0].get("is_success", None) if infos else None
+                success_str = f"  success={bool(success)}" if success is not None else ""
+                print(f"\n  Episode {ep+1} done — steps={step}  return={cumsum:.3f}{success_str}")
+                print(f"{'='*40}")
+                time.sleep(1)  # pause after reset
+
+            render = input("\nwant to render again? [y/n]\n>")
             render = (render == 'y')
 
         render_env.close()

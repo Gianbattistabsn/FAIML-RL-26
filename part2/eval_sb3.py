@@ -51,24 +51,38 @@ def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool
     successes = []
 
     for episode in range(1, n_episodes + 1):
+        print(f"\n{'='*40}")
+        print(f"  Episode {episode} / {n_episodes}")
+        print(f"{'='*40}")
+        time.sleep(1.0)
+
         obs = env.reset()
         done = False
         episode_return = 0.0
-        print(f"\n--- Episode {episode}/{n_episodes} ---")
-        time.sleep(0.5)
+        step = 0
+
         while not done:
-            time.sleep(1/30)
             action, _ = model.predict(obs, deterministic=deterministic)
             obs, reward, dones, infos = env.step(action)
             episode_return += float(reward[0])
+            step += 1
             done = bool(dones[0])
+
+            if step % 20 == 0:
+                print(f"  step={step:4d}  cumulative_reward={episode_return:7.3f}", flush=True)
+
+            time.sleep(0.2)
+
+        success = infos[0].get("is_success", None) if infos else None
+        success_str = f"  success={bool(success)}" if success is not None else ""
+        print(f"\n  Episode {episode} done — steps={step}  return={episode_return:.3f}{success_str}")
+        print(f"{'='*40}")
+        time.sleep(1.0)
 
         episode_returns.append(episode_return)
 
         if infos and "is_success" in infos[0]:
             successes.append(float(infos[0]["is_success"]))
-
-        print(f"Episode {episode:03d} | return = {episode_return:.3f}")
 
     env.close()
 
