@@ -173,7 +173,11 @@ class Agent(object):
                 # from the very start.  Once we have enough history, switch to the
                 # adaptive percentile baseline which stabilises learning at higher performance.
                 if len(self.g0_history) >= 10:
-                    g0_hat = float(np.percentile(self.g0_history[-100:], 25))
+                    # Geometric mean: exp(mean(log(G_0))).
+                    # Values are clipped to 1e-8 to avoid log(0) when an episode
+                    # yields near-zero return (e.g. falls immediately).
+                    recent = np.maximum(self.g0_history[-100:], 1e-8)
+                    g0_hat = float(np.exp(np.mean(np.log(recent))))
                 else:
                     g0_hat = 0.0
                 baseline_vector = g0_hat
