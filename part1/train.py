@@ -27,7 +27,7 @@ SEED = 42                 # random seed to ensure reproducibility
 RENDER = False            # set to True to open a window and watch the agent train (slow!)
 
 
-def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False, normalize=False, device='auto', learning_rate = 1e-4):
+def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False, normalize=False, device='auto', learning_rate=1e-3):
     """Run the training loop and return (policy, ep_rewards, final_checkpoint_path)."""
 
     # Fix seeds so results are reproducible across runs
