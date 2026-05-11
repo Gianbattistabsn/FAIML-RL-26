@@ -114,13 +114,19 @@ class Policy(torch.nn.Module):
 
 class Agent(object):
     def __init__(self, policy, device='cpu'):
-        self.train_device=device
-        if torch.cuda.is_available():
-            self.train_device = 'cuda'
-        elif torch.xpu.is_available():
-            self.train_device = 'xpu'
-        else:
-            self.train_device = 'cpu'
+        # For this workload (tiny 64-unit network, batch size = 1 per step) the
+        # CPU<->GPU/XPU transfer overhead is larger than the actual compute time.
+        # We only move to an accelerator if explicitly requested;
+        if device != 'cpu':
+            if device == 'auto':
+                if torch.cuda.is_available():
+                    device = 'cuda'
+                elif hasattr(torch, 'xpu') and torch.xpu.is_available():
+                    device = 'xpu'
+                else:
+                    device = 'cpu'
+            # else: use whatever the caller passed explicitly
+        self.train_device = device
         
         self.policy = policy.to(self.train_device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
@@ -131,9 +137,13 @@ class Agent(object):
         self.action_log_probs = []
         self.rewards = []
         self.done = []
+        # Circular buffer storing G_0 (discounted return from t=0) of recent episodes.
+        # Used by the adaptive baseline (baseline == -1) to estimate E[G_0].
+        # N=100 balances stability (smooth estimate) vs. responsiveness to policy changes.
+        self.g0_history = []
 
 
-    def update_policy(self, algorithm='reinforce', baseline = 0):
+    def update_policy(self, algorithm='reinforce', baseline=0, normalize=True):
         # the list of states, actions etc... is moved to local variables. The global variables are reset
         # at each update
         
@@ -143,26 +153,59 @@ class Agent(object):
         rewards = torch.stack(self.rewards, dim=0).to(self.train_device).squeeze(-1)
         done = torch.Tensor(self.done).to(self.train_device)
 
-        if baseline > 0:
-            baseline_vector = baseline * np.exp(-20 * np.arange(rewards.shape[0]) / rewards.shape[0])
-        else:
-            baseline_vector = 0
-            
         # TASK 2:
         #   - compute discounted returns
         G_t = discount_rewards(rewards, self.gamma)
         #   - compute policy gradient loss function given actions and returns
         if algorithm == 'reinforce' and done[-1] == True:
-            if baseline == 0:
-                # Whitening: normalise G_t to zero mean, unit std within the episode.
-                # Makes gradient scale consistent regardless of absolute reward magnitude.
-                G_t = (G_t - G_t.mean()) / (G_t.std() + 1e-8)
-            actor_loss = (-(G_t - baseline_vector) * action_log_probs).mean()
+            if baseline == -1:
+                # Adaptive geometric baseline.
+                # Estimate E[G_0] from the last 100 observed discounted returns (N=100
+                # balances stability vs. responsiveness to policy changes).
+                # Then shape the baseline per-timestep using the geometric-series formula:
+                #   b_t = g0_hat * (1 - gamma^(T-t)) / (1 - gamma^T)
+                # This tracks the expected G_t profile so G_t - b_t ≈ 0 in expectation
+                # (zero-bias, minimum-variance baseline under the constant-reward approximation).
+                T = rewards.shape[0]
+                t = torch.arange(T, dtype=torch.float32, device=self.train_device)
+                g0_hat = float(np.mean(self.g0_history[-100:])) if self.g0_history else G_t[0].item()
+                gamma_pow_T  = self.gamma ** T
+                gamma_pow_Tt = self.gamma ** (T - t)
+                baseline_vector = g0_hat * (1.0 - gamma_pow_Tt) / (1.0 - gamma_pow_T + 1e-8)
+                advantage = G_t - baseline_vector
+                if normalize:
+                    # Divide by std to normalise gradient magnitude across episodes.
+                    # We do NOT subtract the mean: the baseline already centres the
+                    # advantages in expectation, and removing the intra-episode mean
+                    # would discard information about whether this episode was above average.
+                    advantage = advantage / (advantage.std() + 1e-8)
+                # Append current G_0 AFTER using the history so the current episode
+                # does not bias its own baseline estimate.
+                self.g0_history.append(G_t[0].item())
+                actor_loss = (-advantage * action_log_probs).mean()
+            elif baseline > 0:
+                # Fixed geometric baseline: the caller supplies a scale constant.
+                #   b_t = baseline * (1 - gamma^(T-t)) / (1 - gamma^T)
+                # No normalisation for this mode (plain REINFORCE variant).
+                T = rewards.shape[0]
+                t = torch.arange(T, dtype=torch.float32, device=self.train_device)
+                gamma_pow_T  = self.gamma ** T
+                gamma_pow_Tt = self.gamma ** (T - t)
+                baseline_vector = baseline * (1.0 - gamma_pow_Tt) / (1.0 - gamma_pow_T + 1e-8)
+                actor_loss = (-(G_t - baseline_vector) * action_log_probs).mean()
+            else:
+                # baseline == 0: pure REINFORCE without an explicit baseline.
+                # If normalize=True, whiten G_t (zero mean, unit std within the episode).
+                # This is a variance-reduction trick; subtracting the episode mean is
+                # equivalent to a state-independent baseline equal to the mean return.
+                if normalize:
+                    G_t = (G_t - G_t.mean()) / (G_t.std() + 1e-8)
+                actor_loss = (-G_t * action_log_probs).mean()
             # The minus sign turns gradient descent into gradient ascent,
             # since we want to MAXIMISE expected return.
-
             self.optimizer.zero_grad()
             actor_loss.backward()
+            
             self.optimizer.step()
             self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
             return actor_loss.item(), actor_loss.item()
