@@ -139,11 +139,11 @@ class Agent(object):
         self.done = []
         # Circular buffer storing G_0 (discounted return from t=0) of recent episodes.
         # Used by the adaptive baseline (baseline == -1) to estimate E[G_0].
-        # N=100 balances stability (smooth estimate) vs. responsiveness to policy changes.
+        # N=500 balances stability (smooth estimate) vs. responsiveness to policy changes.
         self.g0_history = []
 
 
-    def update_policy(self, algorithm='reinforce', baseline=0, normalize=True):
+    def update_policy(self, algorithm='reinforce', baseline=0, normalize=False):
         # the list of states, actions etc... is moved to local variables. The global variables are reset
         # at each update
         
@@ -160,7 +160,7 @@ class Agent(object):
         if algorithm == 'reinforce' and done[-1] == True:
             if baseline == -1:
                 # Adaptive geometric baseline.
-                # Estimate E[G_0] from the last 100 observed discounted returns (N=100
+                # Estimate E[G_0] from the last 500 observed discounted returns (N=500
                 # balances stability vs. responsiveness to policy changes).
                 # Then shape the baseline per-timestep using the geometric-series formula:
                 #   b_t = g0_hat * (1 - gamma^(T-t)) / (1 - gamma^T)
@@ -168,47 +168,30 @@ class Agent(object):
                 # (zero-bias, minimum-variance baseline under the constant-reward approximation).
                 T = rewards.shape[0]
                 t = torch.arange(T, dtype=torch.float32, device=self.train_device)
-                g0_hat = float(np.mean(self.g0_history[-100:])) if self.g0_history else G_t[0].item()
-                gamma_pow_T  = self.gamma ** T
-                gamma_pow_Tt = self.gamma ** (T - t)
-                baseline_vector = g0_hat * (1.0 - gamma_pow_Tt) / (1.0 - gamma_pow_T + 1e-8)
+                g0_hat = float(np.mean(self.g0_history[-500:])) if self.g0_history else G_t[0].item()
+                baseline_vector = g0_hat 
                 advantage = G_t - baseline_vector
                 if normalize:
-                    # Intra-episode normalisation: divide by the std of advantages
-                    # within this episode. Keeps gradient scale constant but compresses
-                    # relative differences between timesteps.
+                    # Divide by std to normalise gradient magnitude across episodes.
+                    # We do NOT subtract the mean: the baseline already centres the
+                    # advantages in expectation, and removing the intra-episode mean
+                    # would discard information about whether this episode was above average.
                     advantage = advantage / (advantage.std() + 1e-8)
-                else:
-                    # Cross-episode normalisation: divide by the historical std of G_0.
-                    # This keeps the intra-episode shape intact (so the policy still
-                    # knows which timesteps were better) while preventing gradient scale
-                    # from inflating as performance grows. Only kicks in once we have
-                    # at least 2 episodes of history.
-                    if len(self.g0_history) >= 2:
-                        g0_std = float(np.std(self.g0_history[-100:]))
-                        advantage = advantage / (g0_std + 1e-8)
                 # Append current G_0 AFTER using the history so the current episode
                 # does not bias its own baseline estimate.
                 self.g0_history.append(G_t[0].item())
                 actor_loss = (-advantage * action_log_probs).mean()
-            elif baseline > 0:
-                # Fixed geometric baseline: the caller supplies a scale constant.
-                #   b_t = baseline * (1 - gamma^(T-t)) / (1 - gamma^T)
-                # No normalisation for this mode (plain REINFORCE variant).
-                T = rewards.shape[0]
-                t = torch.arange(T, dtype=torch.float32, device=self.train_device)
-                gamma_pow_T  = self.gamma ** T
-                gamma_pow_Tt = self.gamma ** (T - t)
-                baseline_vector = baseline * (1.0 - gamma_pow_Tt) / (1.0 - gamma_pow_T + 1e-8)
-                actor_loss = (-(G_t - baseline_vector) * action_log_probs).mean()
             else:
-                # baseline == 0: pure REINFORCE without an explicit baseline.
-                # If normalize=True, whiten G_t (zero mean, unit std within the episode).
-                # This is a variance-reduction trick; subtracting the episode mean is
-                # equivalent to a state-independent baseline equal to the mean return.
+                # Fixed constant baseline: subtract the same value from every G_t.
+                #   baseline=0  → pure REINFORCE (no baseline)
+                #   baseline=k  → subtract the constant k from every return
+                # If normalize=True, whiten the advantage (zero mean, unit std within
+                # the episode) for scale-invariant gradient updates.
+                advantage = G_t - baseline
                 if normalize:
-                    G_t = (G_t - G_t.mean()) / (G_t.std() + 1e-8)
-                actor_loss = (-G_t * action_log_probs).mean()
+                    advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+                actor_loss = (-advantage * action_log_probs).mean()
+
             # The minus sign turns gradient descent into gradient ascent,
             # since we want to MAXIMISE expected return.
             self.optimizer.zero_grad()

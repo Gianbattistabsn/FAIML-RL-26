@@ -16,9 +16,9 @@ from agent import Agent, Policy
 
 algorithm = 'reinforce'   # which algorithm to use: 'reinforce' or 'actor_critic'
 baseline = 20             # subtract this constant from the return to reduce gradient variance
-                          #   -1 -> adaptive geometric (mean of last 100 G_0 values)
+                          #   -1 -> adaptive: b_t = mean(last-500 G_0) * geometric shape
                           #    0 -> pure REINFORCE (optionally whiten G_t if normalize=True)
-                          #   >0 -> fixed geometric per-timestep baseline
+                          #   >0 -> fixed constant: subtracts baseline from every G_t
 normalize = True          # apply variance-reduction normalisation (mode depends on baseline)
 run_name = f'baseline_{baseline}'  # just a label so I can tell different runs apart in the filename
 
@@ -27,7 +27,7 @@ SEED = 42                 # random seed to ensure reproducibility
 RENDER = False            # set to True to open a window and watch the agent train (slow!)
 
 
-def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False, normalize=True, device='auto'):
+def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False, normalize=False, device='auto'):
     """Run the training loop and return (policy, ep_rewards, final_checkpoint_path)."""
 
     # Fix seeds so results are reproducible across runs
