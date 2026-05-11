@@ -19,7 +19,6 @@ baseline = 20             # subtract this constant from the return to reduce gra
                           #   -1 -> adaptive: b = percentile_25(last-500 G_0), subtracted from every G_t
                           #    0 -> pure REINFORCE (optionally whiten G_t if normalize=True)
                           #   >0 -> fixed constant: subtracts baseline from every G_t
-normalize = True          # apply variance-reduction normalisation (mode depends on baseline)
 run_name = f'baseline_{baseline}'  # just a label so I can tell different runs apart in the filename
 
 NUM_EPISODES = 20000      # how many full episodes to train for
