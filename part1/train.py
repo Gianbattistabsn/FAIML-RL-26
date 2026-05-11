@@ -162,7 +162,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False,
 def main():
     checkpoint_dir = f"part1/checkpoints/{algorithm}_{run_name}"
     os.makedirs(checkpoint_dir, exist_ok=True)
-    train(algorithm, baseline, NUM_EPISODES, SEED, checkpoint_dir, render=RENDER, normalize=normalize)
+    train(algorithm, baseline, NUM_EPISODES, SEED, checkpoint_dir, render=RENDER)
 
 
 if __name__ == '__main__':
