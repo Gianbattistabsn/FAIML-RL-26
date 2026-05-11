@@ -174,11 +174,19 @@ class Agent(object):
                 baseline_vector = g0_hat * (1.0 - gamma_pow_Tt) / (1.0 - gamma_pow_T + 1e-8)
                 advantage = G_t - baseline_vector
                 if normalize:
-                    # Divide by std to normalise gradient magnitude across episodes.
-                    # We do NOT subtract the mean: the baseline already centres the
-                    # advantages in expectation, and removing the intra-episode mean
-                    # would discard information about whether this episode was above average.
+                    # Intra-episode normalisation: divide by the std of advantages
+                    # within this episode. Keeps gradient scale constant but compresses
+                    # relative differences between timesteps.
                     advantage = advantage / (advantage.std() + 1e-8)
+                else:
+                    # Cross-episode normalisation: divide by the historical std of G_0.
+                    # This keeps the intra-episode shape intact (so the policy still
+                    # knows which timesteps were better) while preventing gradient scale
+                    # from inflating as performance grows. Only kicks in once we have
+                    # at least 2 episodes of history.
+                    if len(self.g0_history) >= 2:
+                        g0_std = float(np.std(self.g0_history[-100:]))
+                        advantage = advantage / (g0_std + 1e-8)
                 # Append current G_0 AFTER using the history so the current episode
                 # does not bias its own baseline estimate.
                 self.g0_history.append(G_t[0].item())
