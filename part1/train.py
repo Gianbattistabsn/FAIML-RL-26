@@ -16,7 +16,7 @@ from agent import Agent, Policy
 
 algorithm = 'reinforce'   # which algorithm to use: 'reinforce' or 'actor_critic'
 baseline = 20             # subtract this constant from the return to reduce gradient variance
-                          #   -1 -> adaptive: b_t = mean(last-500 G_0) * geometric shape
+                          #   -1 -> adaptive: b = percentile_25(last-500 G_0), subtracted from every G_t
                           #    0 -> pure REINFORCE (optionally whiten G_t if normalize=True)
                           #   >0 -> fixed constant: subtracts baseline from every G_t
 normalize = True          # apply variance-reduction normalisation (mode depends on baseline)

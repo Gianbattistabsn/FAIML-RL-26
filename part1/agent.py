@@ -159,22 +159,21 @@ class Agent(object):
         #   - compute policy gradient loss function given actions and returns
         if algorithm == 'reinforce' and done[-1] == True:
             if baseline == -1:
-                # Adaptive geometric baseline.
-                # Estimate E[G_0] from the last 500 observed discounted returns (N=500
-                # balances stability vs. responsiveness to policy changes).
-                # Then shape the baseline per-timestep using the geometric-series formula:
-                #   b_t = g0_hat * (1 - gamma^(T-t)) / (1 - gamma^T)
-                # This tracks the expected G_t profile so G_t - b_t ≈ 0 in expectation
-                # (zero-bias, minimum-variance baseline under the constant-reward approximation).
-                T = rewards.shape[0]
-                t = torch.arange(T, dtype=torch.float32, device=self.train_device)
-                g0_hat = float(np.mean(self.g0_history[-500:])) if self.g0_history else G_t[0].item()
-                baseline_vector = g0_hat 
+                # Adaptive constant baseline.
+                # Estimate the 25th percentile of G_0 from the last 500 observed
+                # discounted returns (N=500 balances stability vs. responsiveness).
+                # Using the 25th percentile instead of the mean keeps the baseline
+                # below the current average return, so the majority of advantages
+                # remain positive and the gradient signal does not collapse when
+                # performance plateaus.
+                #   b = percentile_25(last-500 G_0)
+                g0_hat = float(np.percentile(self.g0_history[-500:], 25)) if self.g0_history else G_t[0].item()
+                baseline_vector = g0_hat
                 advantage = G_t - baseline_vector
                 if normalize:
                     # Divide by std to normalise gradient magnitude across episodes.
-                    # We do NOT subtract the mean: the baseline already centres the
-                    # advantages in expectation, and removing the intra-episode mean
+                    # We do NOT subtract the mean: the baseline already keeps the
+                    # advantages mostly positive, and removing the intra-episode mean
                     # would discard information about whether this episode was above average.
                     advantage = advantage / (advantage.std() + 1e-8)
                 # Append current G_0 AFTER using the history so the current episode
