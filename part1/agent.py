@@ -113,7 +113,7 @@ class Policy(torch.nn.Module):
 
 
 class Agent(object):
-    def __init__(self, policy, device='cpu'):
+    def __init__(self, policy, device='cpu', learning_rate=1e-4):
         # For this workload (tiny 64-unit network, batch size = 1 per step) the
         # CPU<->GPU/XPU transfer overhead is larger than the actual compute time.
         # We only move to an accelerator if explicitly requested;
@@ -129,7 +129,7 @@ class Agent(object):
         self.train_device = device
         
         self.policy = policy.to(self.train_device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
+        self.optimizer = torch.optim.Adam(policy.parameters(), lr=learning_rate)
 
         self.gamma = 0.99
         self.states = []

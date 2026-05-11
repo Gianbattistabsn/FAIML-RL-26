@@ -27,7 +27,7 @@ SEED = 42                 # random seed to ensure reproducibility
 RENDER = False            # set to True to open a window and watch the agent train (slow!)
 
 
-def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False, normalize=False, device='auto'):
+def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False, normalize=False, device='auto', learning_rate = 1e-4):
     """Run the training loop and return (policy, ep_rewards, final_checkpoint_path)."""
 
     # Fix seeds so results are reproducible across runs
@@ -49,7 +49,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False,
     policy = Policy(state_space=env.observation_space.shape[0], action_space=env.action_space.shape[0])
 
     # The Agent wraps the policy and owns the optimizer and experience buffer.
-    agent = Agent(policy, device=device)
+    agent = Agent(policy, device=device, learning_rate=learning_rate)
 
     # Timestamp used in checkpoint filenames so I can tell runs apart.
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
