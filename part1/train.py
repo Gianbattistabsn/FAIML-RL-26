@@ -5,6 +5,7 @@
 import datetime
 import os
 import random
+import time
 
 import numpy as np
 import gymnasium as gym
@@ -15,6 +16,9 @@ from agent import Agent, Policy
 
 algorithm = 'reinforce'   # which algorithm to use: 'reinforce' or 'actor_critic'
 baseline = 20             # subtract this constant from the return to reduce gradient variance
+                          #   -1 -> adaptive: b = percentile_25(last-500 G_0), subtracted from every G_t
+                          #    0 -> pure REINFORCE (optionally whiten G_t if normalize=True)
+                          #   >0 -> fixed constant: subtracts baseline from every G_t
 run_name = f'baseline_{baseline}'  # just a label so I can tell different runs apart in the filename
 
 NUM_EPISODES = 20000      # how many full episodes to train for
@@ -22,7 +26,7 @@ SEED = 42                 # random seed to ensure reproducibility
 RENDER = False            # set to True to open a window and watch the agent train (slow!)
 
 
-def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False):
+def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False, normalize=False, device='auto', learning_rate=1e-3):
     """Run the training loop and return (policy, ep_rewards, final_checkpoint_path)."""
 
     # Fix seeds so results are reproducible across runs
@@ -44,7 +48,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
     policy = Policy(state_space=env.observation_space.shape[0], action_space=env.action_space.shape[0])
 
     # The Agent wraps the policy and owns the optimizer and experience buffer.
-    agent = Agent(policy)
+    agent = Agent(policy, device=device, learning_rate=learning_rate)
 
     # Timestamp used in checkpoint filenames so I can tell runs apart.
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -56,6 +60,8 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
     total_reward = 0.0  # running sum of all rewards across all episodes
     best_avg_reward = float('-inf')  # track the best 100-episode moving average seen so far
     best_ckpt_path = None            # path to the current best checkpoint on disk
+    train_start = time.time()        # wall-clock start for elapsed-time display
+    interval_start = time.time()     # wall-clock start of the current 100-ep interval
 
     for i in range(num_episodes):
         done = False
@@ -83,22 +89,16 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
             # Store this transition so update_policy() can use it for the gradient update.
             agent.store_outcome(state, next_state, action_log_prob, reward, done)
 
-            # Resolve the actual baseline value to pass down:
-            #   baseline == -1  → adaptive: moving average of last 100 episode returns
-            #   baseline ==  0  → G_t whitening (handled inside update_policy)
-            #   baseline  >  0  → fixed constant subtraction
-            if baseline:
-                actual_baseline = float(np.mean(ep_rewards[-100:])) if ep_rewards else baseline
-            else:
-                actual_baseline = baseline
-
-            # update_policy() is called every step, but the actual gradient update
-            # only fires when done=True (end of episode) because REINFORCE is Monte Carlo:
-            # it needs the full trajectory to compute the return G_t.
-            actor_loss, critic_loss = agent.update_policy(algorithm=algorithm, baseline=actual_baseline)
+            # update_policy() is called every step for actor_critic.
+            # For REINFORCE, the gradient update fires after the full episode (see below).
+            # All three baseline modes are handled inside update_policy; no resolution needed here.
+            if algorithm != 'reinforce':
+                actor_loss, critic_loss = agent.update_policy(algorithm=algorithm, baseline=baseline, normalize=normalize)
 
             state = next_state  # advance to the next state
         # End of episode
+        if algorithm == 'reinforce':
+            actor_loss, critic_loss = agent.update_policy(algorithm=algorithm, baseline=baseline, normalize=normalize)
 
         ep_rewards.append(ep_reward)
         ep_lengths.append(ep_length)
@@ -121,12 +121,20 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False)
             avg_critic_loss  = np.mean(ep_critic_losses[-100:]) if ep_critic_losses else float('nan')
             sigma_eff = F.softplus(policy.sigma).detach().cpu().numpy()
             sigma_history.append((i + 1, sigma_eff.copy()))
+            now = time.time()
+            elapsed_total = now - train_start
+            interval_secs = now - interval_start
+            steps_in_interval = sum(ep_lengths[-100:])
+            steps_per_sec = steps_in_interval / interval_secs if interval_secs > 0 else 0.0
+            elapsed_str = time.strftime('%H:%M:%S', time.gmtime(elapsed_total))
+            interval_start = now  # reset for next 100-ep window
             print(
                 f"Ep {i+1:>6}/{num_episodes} | "
                 f"avg: {avg_100:7.1f}  min: {min_100:7.1f}  max: {max_100:7.1f} | "
                 f"len: {avg_len:5.0f} | actor loss: {avg_actor_loss:8.4f} | critic loss: {avg_critic_loss:8.4f} | "
                 f"σ: [{', '.join(f'{s:.3f}' for s in sigma_eff)}] | "
-                f"best: {best_avg_reward:.1f}"
+                f"best: {best_avg_reward:.1f} | "
+                f"elapsed: {elapsed_str}  ({steps_per_sec:.0f} steps/s)"
             )
 
             if avg_100 > best_avg_reward:

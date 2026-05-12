@@ -76,7 +76,7 @@ def main():
     print(ckpts)
 
     ckpt = ckpts[-1]
-    ckpt = "part1/checkpoints/reinforce_baseline_20/reinforce_best_ep17300_avg202.pt"
+    ckpt = "part1/checkpoints/reinforce_baseline_-1/reinforce_best_ep25000_avg941.pt"
     print(f"Loading: {ckpt}")
     rewards = evaluate(ckpt, render=RENDER)
     print(f"Mean reward: {np.mean(rewards):.2f}")

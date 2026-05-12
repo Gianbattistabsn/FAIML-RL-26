@@ -53,6 +53,8 @@ class Policy(torch.nn.Module):
         init_sigma = 0.5
         self.sigma = torch.nn.Parameter(torch.zeros(self.action_space)+init_sigma) #self.sigma = [0.5,0.5,0.5]
 
+        
+        self.init_weights()
 
         """
             Critic network
@@ -61,10 +63,9 @@ class Policy(torch.nn.Module):
         self.fc1_critic = torch.nn.Linear(state_space, self.hidden)
         self.fc2_critic = torch.nn.Linear(self.hidden, self.hidden)
         self.fc3_critic = torch.nn.Linear(self.hidden, 1) #V(s) is a scalar function
-
-
-
-        self.init_weights()
+        for layer in (self.fc1_critic, self.fc2_critic, self.fc3_critic):
+            torch.nn.init.normal_(layer.weight)
+            torch.nn.init.zeros_(layer.bias)
 
 
     def init_weights(self):
@@ -113,17 +114,23 @@ class Policy(torch.nn.Module):
 
 
 class Agent(object):
-    def __init__(self, policy, device='cpu'):
-        self.train_device=device
-        if torch.cuda.is_available():
-            self.train_device = 'cuda'
-        elif torch.xpu.is_available():
-            self.train_device = 'xpu'
-        else:
-            self.train_device = 'cpu'
+    def __init__(self, policy, device='cpu', learning_rate=1e-4):
+        # For this workload (tiny 64-unit network, batch size = 1 per step) the
+        # CPU<->GPU/XPU transfer overhead is larger than the actual compute time.
+        # We only move to an accelerator if explicitly requested;
+        if device != 'cpu':
+            if device == 'auto':
+                if torch.cuda.is_available():
+                    device = 'cuda'
+                elif hasattr(torch, 'xpu') and torch.xpu.is_available():
+                    device = 'xpu'
+                else:
+                    device = 'cpu'
+            # else: use whatever the caller passed explicitly
+        self.train_device = device
         
         self.policy = policy.to(self.train_device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
+        self.optimizer = torch.optim.Adam(policy.parameters(), lr=learning_rate)
 
         self.gamma = 0.99
         self.states = []
@@ -131,9 +138,13 @@ class Agent(object):
         self.action_log_probs = []
         self.rewards = []
         self.done = []
+        # Circular buffer storing G_0 (discounted return from t=0) of recent episodes.
+        # Used by the adaptive baseline (baseline == -1) to estimate E[G_0].
+        # N=500 balances stability (smooth estimate) vs. responsiveness to policy changes.
+        self.g0_history = []
 
 
-    def update_policy(self, algorithm='reinforce', baseline = 0):
+    def update_policy(self, algorithm='reinforce', baseline=0, normalize=False):
         # the list of states, actions etc... is moved to local variables. The global variables are reset
         # at each update
         
@@ -143,26 +154,59 @@ class Agent(object):
         rewards = torch.stack(self.rewards, dim=0).to(self.train_device).squeeze(-1)
         done = torch.Tensor(self.done).to(self.train_device)
 
-        if baseline > 0:
-            baseline_vector = baseline * np.exp(-20 * np.arange(rewards.shape[0]) / rewards.shape[0])
-        else:
-            baseline_vector = 0
-            
         # TASK 2:
         #   - compute discounted returns
         G_t = discount_rewards(rewards, self.gamma)
         #   - compute policy gradient loss function given actions and returns
         if algorithm == 'reinforce' and done[-1] == True:
-            if baseline == 0:
-                # Whitening: normalise G_t to zero mean, unit std within the episode.
-                # Makes gradient scale consistent regardless of absolute reward magnitude.
-                G_t = (G_t - G_t.mean()) / (G_t.std() + 1e-8)
-            actor_loss = (-(G_t - baseline_vector) * action_log_probs).mean()
+            if baseline == -1:
+                # Adaptive constant baseline.
+                # Estimate the 25th percentile of G_0 from the last 100 observed
+                # discounted returns (N=100 balances stability vs. responsiveness).
+                # Using the 25th percentile instead of the mean keeps the baseline
+                # below the current average return, so the majority of advantages
+                # remain positive and the gradient signal does not collapse when
+                # performance plateaus.
+                #   b = percentile_25(last-500 G_0)
+                # Use pure REINFORCE (baseline=0) for the first 10 episodes so that
+                # all advantages are positive and the policy gets a useful learning signal
+                # from the very start.  Once we have enough history, switch to the
+                # adaptive percentile baseline which stabilises learning at higher performance.
+                if len(self.g0_history) >= 10:
+                    # 25th percentile of recent G_0: keeps the baseline below the
+                    # current average return so ~75% of episodes yield a positive
+                    # advantage at t=0, providing strong gradient signal.
+                    g0_hat = float(np.percentile(self.g0_history[-100:], 25))
+                else:
+                    g0_hat = 0.0
+                baseline_vector = g0_hat
+                advantage = G_t - baseline_vector
+                if normalize:
+                    # Divide by std to normalise gradient magnitude across episodes.
+                    # We do NOT subtract the mean: the baseline already keeps the
+                    # advantages mostly positive, and removing the intra-episode mean
+                    # would discard information about whether this episode was above average.
+                    advantage = advantage / (advantage.std() + 1e-8)
+                # Append current G_0 AFTER using the history so the current episode
+                # does not bias its own baseline estimate.
+                self.g0_history.append(G_t[0].item())
+                actor_loss = (-advantage * action_log_probs).mean()
+            else:
+                # Fixed constant baseline: subtract the same value from every G_t.
+                #   baseline=0  → pure REINFORCE (no baseline)
+                #   baseline=k  → subtract the constant k from every return
+                # If normalize=True, whiten the advantage (zero mean, unit std within
+                # the episode) for scale-invariant gradient updates.
+                advantage = G_t - baseline
+                if normalize:
+                    advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+                actor_loss = (-advantage * action_log_probs).mean()
+
             # The minus sign turns gradient descent into gradient ascent,
             # since we want to MAXIMISE expected return.
-
             self.optimizer.zero_grad()
             actor_loss.backward()
+            
             self.optimizer.step()
             self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
             return actor_loss.item(), actor_loss.item()

@@ -23,3 +23,5 @@ var/
 .installed.cfg
 *.egg
 pybullet312
+wandb
+models
