@@ -9,14 +9,18 @@ class RandomizationWrapper(gym.Wrapper):
 
     This wrapper manages the randomization of environment properties, in particular mass,
     to facilitate Sim2Real transfer and improve policy robustness. It supports Uniform Domain
-    Randomization (UDR) and Automatic Domain Randomization (ADR) strategies.
+    Randomization (UDR) and *bounded* Automatic Domain Randomization (b-ADR) strategies.
 
     Args:
         env (gym.Env): The base Gym environment to be wrapped.
         mode (str): The domain randomization strategy to use. Must be one of 'none' (disabled),
             'udr' (Uniform Domain Randomization), or 'adr' (Automatic Domain Randomization).
         mass_range (tuple[float, float]): The absolute minimum and maximum limits for mass
-            randomization. The first value must be less than or equal to the second.
+            randomization. The first value must be less than or equal to the second, and
+            greater than zero. In UDR mode this is the fixed sampling range. In ADR mode
+            boundaries start at the midpoint of this range and are expanded outward — but
+            never past these limits (this is the *bounded* variant of ADR) — or retracted
+            inward (clamped so `_mass_min <= _mass_max`).
         seed (int, optional): Seed for the internal random number generator to ensure
             reproducibility.
         verbose (bool): If True, enables detailed logging of the randomization process.
@@ -33,11 +37,12 @@ class RandomizationWrapper(gym.Wrapper):
 
     Raises:
         ValueError: If an unrecognized `mode` is provided.
-        ValueError: If `mass_range` is invalid (i.e., the minimum limit greater than the maximum).
+        ValueError: If `mass_range` is invalid (i.e., the minimum limit greater than the maximum,
+            or is not greater than 0).
         ValueError: If parameters `adr_delta`, `adr_buffer_size`, `adr_boundary_prob` fall outside
             valid numeric ranges.
         ValueError: If `adr_perf_low` is not lower than `adr_perf_high`
-        """
+    """
 
     def __init__(self,
                  env: gym.Env,
@@ -61,8 +66,11 @@ class RandomizationWrapper(gym.Wrapper):
         self.mode = mode
 
         # range check
-        if mass_range[0] > mass_range[1]:
-            raise ValueError(f"Invalid mass_range={mass_range}: lower bound must be less than or equal to upper bound.")
+        if mass_range[0] > mass_range[1] or mass_range[0] <= 0.0:
+            raise ValueError(
+                f"Invalid mass_range={mass_range}: lower bound must be less than or equal to upper bound,"
+                f" and greater than 0."
+            )
         self._mass_min_limit, self._mass_max_limit = mass_range
 
         # environment parameters
@@ -95,7 +103,7 @@ class RandomizationWrapper(gym.Wrapper):
         if adr_perf_low >= adr_perf_high:
             raise ValueError(
                 f"Invalid performance thresholds adr_perf_low={adr_perf_low} and adr_perf_high={adr_perf_high};"
-                " lower threshold must be less than upper threshold."
+                f" lower threshold must be less than upper threshold."
             )
         self.adr_perf_low = adr_perf_low
         self.adr_perf_high = adr_perf_high
@@ -227,6 +235,7 @@ class RandomizationWrapper(gym.Wrapper):
         Acts when a boundary performance buffer reaches `adr_buffer_size`.
         - If mean reward > `adr_perf_high`: Range expands by `adr_delta` (outward).
         - If mean reward < `adr_perf_low`: Range shrinks by `adr_delta` (inward).
+        - adr_perf_low <= mean_return <= adr_perf_high  -> dead zone, no update
 
         Expansions are clamped by the global `mass_range` limits. Retractions are
         clamped to prevent the min boundary from exceeding the max boundary.
@@ -288,7 +297,7 @@ class RandomizationWrapper(gym.Wrapper):
         based on relative dynamic statistics (e.g., historical moving averages of returns)
         instead of hardcoded, static reward thresholds.
         """
-        # TODO! idea: what if we did dynamic mean_return checking against a previous return or some statistic of previous returns, instead of hard reward thresholds? ask
+        #TODO idea: what if we did dynamic mean_return checking against a previous return or some statistic of previous returns, instead of hard reward thresholds? ask
         pass
 
     # -----------------------
@@ -318,17 +327,17 @@ class RandomizationWrapper(gym.Wrapper):
             self._episode_return += float(reward)
 
         # episode ended ?
-        done = terminated or truncated # TODO! we can try to see what happens if truncated is not considered for performance evaluation
+        done = terminated or truncated #TODO we can try to see what happens if truncated is not considered for performance evaluation
 
         # if episode ended and adr mode has done boundary sampling, update relative buffer
-        if done and self.mode == "adr" and self._current_boundary is not None:  # TODO! do we consider truncated episodes valid contributions to boundary update?
+        if done and self.mode == "adr" and self._current_boundary is not None:  #TODO do we consider truncated episodes valid contributions to boundary update?
             if self._current_boundary == "low":
                 self._buffer_low.append(self._episode_return)
             else:  # "high"
                 self._buffer_high.append(self._episode_return)
             self._update_boundaries()
 
-            # TODO! see if info variable can be integrated with our stuff:
+            #TODO see if info variable can be integrated with our stuff:
             # expose randomization state for downstream loggers (W&B etc.).
             # copy first so we don't mutate a dict the underlying env may reuse.
             # info = dict(info)
@@ -377,15 +386,8 @@ class RandomizationWrapper(gym.Wrapper):
                                               mass=float(new_mass))
             # log change
             if self.verbose:
-                print(f"[{self.mode}] mass={new_mass:.2f} "
-                      f"range=[{self._mass_min:.2f},{self._mass_max:.2f}] "
-                      f"type={self._last_sample_type}")
+                print(f"[{self.mode}] mass={new_mass:.2f} "                  # print(f"[{self.mode}] mass={new_mass:.3f}")
+                      f"range=[{self._mass_min:.2f},{self._mass_max:.2f}] "  # print(f"range=[{self.mass_min:.3f},{self.mass_max:.3f}]")
+                      f"type={self._last_sample_type}")                      # print(f"type={self.last_sample_type}")
         # apply parent class reset
         return super().reset(**kwargs)
-
-#print(f"[{self.mode}] mass={new_mass:.3f}")
-#print(f"range=[{self.mass_min:.3f},{self.mass_max:.3f}]")
-#print(f"type={self.last_sample_type}")
-
-# notes: range and range limits are duplicated, could be normalized. possible to leave
-# a public range attr and render the limits private and moving limits private
