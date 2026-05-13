@@ -63,9 +63,6 @@ class RandomizationWrapper(gym.Wrapper):
         # range check
         if mass_range[0] > mass_range[1]:
             raise ValueError(f"Invalid mass_range={mass_range}: lower bound must be less than or equal to upper bound.")
-        self.mass_range = mass_range  # TODO! optional attribute, kept because present in original stub
-
-        # global randomization limits TODO! deduced by stub nomenclature, ask if ADR can go outside the init range. otherwise the default range init is a dead end for adr.
         self._mass_min_limit, self._mass_max_limit = mass_range
 
         # environment parameters
@@ -78,7 +75,7 @@ class RandomizationWrapper(gym.Wrapper):
             self._mass_max = self._mass_max_limit
 
         # random number generator
-        self._rng = np.random.default_rng(seed) # TODO!, this class' methods use a half open range [a,b), but in the ADR paper it specifies [a,b] interval for boundary expansion. Probably irrelevant, ask for confirmation.
+        self._rng = np.random.default_rng(seed)
 
         # verbose flag
         self.verbose = verbose
@@ -245,7 +242,7 @@ class RandomizationWrapper(gym.Wrapper):
             mean_return = np.mean(np.array(self._buffer_low))
             # expand lower boundary if mean_return is above the upper threshold
             if mean_return > self.adr_perf_high:
-                self._mass_min = max(self._mass_min - self.adr_delta, self._mass_min_limit)  # bounded by initial range constraint TODO! ask if it was meant to be bounded or not
+                self._mass_min = max(self._mass_min - self.adr_delta, self._mass_min_limit)  # bounded by initial range constraint
                 # log boundary expansion update
                 if self.verbose:
                     print(f"[adr] mass_min expanded to {self._mass_min:.3f} (mean_return={mean_return:.2f} > {self.adr_perf_high})")
@@ -267,7 +264,7 @@ class RandomizationWrapper(gym.Wrapper):
             mean_return = np.mean(np.array(self._buffer_high))
             # expand upper boundary if mean_return is above the upper threshold
             if mean_return > self.adr_perf_high:
-                self._mass_max = min(self._mass_max + self.adr_delta, self._mass_max_limit)  # bounded by initial range constraint TODO! ask if it was meant to be bounded or not
+                self._mass_max = min(self._mass_max + self.adr_delta, self._mass_max_limit)  # bounded by initial range constraint
                 # log boundary expansion update
                 if self.verbose:
                     print(f"[adr] mass_max expanded to {self._mass_max:.3f} (mean_return={mean_return:.2f} > {self.adr_perf_high})")
@@ -321,7 +318,7 @@ class RandomizationWrapper(gym.Wrapper):
             self._episode_return += float(reward)
 
         # episode ended ?
-        done = terminated or truncated
+        done = terminated or truncated # TODO! we can try to see what happens if truncated is not considered for performance evaluation
 
         # if episode ended and adr mode has done boundary sampling, update relative buffer
         if done and self.mode == "adr" and self._current_boundary is not None:  # TODO! do we consider truncated episodes valid contributions to boundary update?
