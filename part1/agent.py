@@ -5,6 +5,20 @@ from torch.distributions import Normal
 
 
 def discount_rewards(r, gamma):
+    """Compute discounted returns G_t for each timestep t in an episode.
+
+    REINFORCE needs the *return* G_t, not just the immediate reward r_t.
+    The return is the sum of all future rewards, each one discounted by gamma:
+
+        G_t = r_t + gamma*r_{t+1} + gamma^2*r_{t+2} + ...
+
+    We iterate backwards so we can reuse the value computed for t+1:
+
+        G_t = r_t + gamma * G_{t+1}
+
+    gamma < 1 (e.g. 0.99) makes rewards far in the future worth less,
+    which keeps G_t finite and prioritises near-term outcomes.
+    """
     discounted_r = torch.zeros_like(r)
     running_add = 0
     for t in reversed(range(0, r.size(-1))):
@@ -28,19 +42,30 @@ class Policy(torch.nn.Module):
         self.fc2_actor = torch.nn.Linear(self.hidden, self.hidden)
         self.fc3_actor_mean = torch.nn.Linear(self.hidden, action_space)
         
-        # Learned standard deviation for exploration at training time 
+        # Learned standard deviation for exploration at training time.
+        # sigma controls how "spread out" the action distribution is:
+        #   - large sigma  -> wide distribution -> more exploration (random actions)
+        #   - small sigma  -> narrow distribution -> more exploitation (near-deterministic)
+        # We use softplus (a smooth version of ReLU) to guarantee sigma > 0,
+        # because a standard deviation must always be positive.
+        # sigma is a learnable parameter: the network decides how much to explore.
         self.sigma_activation = F.softplus
         init_sigma = 0.5
-        self.sigma = torch.nn.Parameter(torch.zeros(self.action_space)+init_sigma)
+        self.sigma = torch.nn.Parameter(torch.zeros(self.action_space)+init_sigma) #self.sigma = [0.5,0.5,0.5]
 
+        
+        self.init_weights()
 
         """
             Critic network
         """
         # TASK 3: critic network for actor-critic algorithm
-
-
-        self.init_weights()
+        self.fc1_critic = torch.nn.Linear(state_space, self.hidden)
+        self.fc2_critic = torch.nn.Linear(self.hidden, self.hidden)
+        self.fc3_critic = torch.nn.Linear(self.hidden, 1) #V(s) is a scalar function
+        for layer in (self.fc1_critic, self.fc2_critic, self.fc3_critic):
+            torch.nn.init.normal_(layer.weight)
+            torch.nn.init.zeros_(layer.bias)
 
 
     def init_weights(self):
@@ -50,32 +75,62 @@ class Policy(torch.nn.Module):
                 torch.nn.init.zeros_(m.bias)
 
 
-    def forward(self, x):
+    def forward(self, x, critic=False): 
         """
             Actor
         """
-        x_actor = self.tanh(self.fc1_actor(x))
-        x_actor = self.tanh(self.fc2_actor(x_actor))
-        action_mean = self.fc3_actor_mean(x_actor)
+        if(not critic):
 
-        sigma = self.sigma_activation(self.sigma)
-        normal_dist = Normal(action_mean, sigma)
+            # Pass the state through the 3-layer MLP to get the mean action.
+            # Tanh squashes activations to (-1, 1), which helps training stability.
+            x_actor = self.tanh(self.fc1_actor(x))
+            x_actor = self.tanh(self.fc2_actor(x_actor))
+            action_mean = self.fc3_actor_mean(x_actor)   # shape: (action_space,)
 
+            # Apply softplus to sigma so it is always positive (required for a std dev).
+            sigma = self.sigma_activation(self.sigma)    # shape: (action_space,)
+            # we never have the case where sigma = 0.5, because we immediately do softplus(0.5) which is equal to 0.9
+
+            # Build a Gaussian distribution N(action_mean, sigma) over the action space.
+            # Hopper has 3 continuous joints, so this is a 3-dimensional Gaussian
+            # (one independent Normal per joint).
+            normal_dist = Normal(action_mean, sigma)
+            return normal_dist
 
         """
             Critic
         """
-        # TASK 3: forward in the critic network
-
         
-        return normal_dist
+        if(critic):
+
+            # TASK 3: forward in the critic network
+            # for now the critic NN has the same structure of the actor. The only thing changed
+            # is that the last layer doesn't have an activation. This is because V(s) can go from
+            # +Inf to -Inf
+            x_critic = self.tanh(self.fc1_critic(x))
+            x_critic = self.tanh(self.fc2_critic(x_critic))
+            value_func = self.fc3_critic(x_critic)
+            return value_func
 
 
 class Agent(object):
-    def __init__(self, policy, device='cpu'):
+    def __init__(self, policy, device='cpu', learning_rate=1e-4):
+        # For this workload (tiny 64-unit network, batch size = 1 per step) the
+        # CPU<->GPU/XPU transfer overhead is larger than the actual compute time.
+        # We only move to an accelerator if explicitly requested;
+        if device != 'cpu':
+            if device == 'auto':
+                if torch.cuda.is_available():
+                    device = 'cuda'
+                elif hasattr(torch, 'xpu') and torch.xpu.is_available():
+                    device = 'xpu'
+                else:
+                    device = 'cpu'
+            # else: use whatever the caller passed explicitly
         self.train_device = device
+        
         self.policy = policy.to(self.train_device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.Adam(policy.parameters(), lr=learning_rate)
 
         self.gamma = 0.99
         self.states = []
@@ -83,58 +138,185 @@ class Agent(object):
         self.action_log_probs = []
         self.rewards = []
         self.done = []
+        # Circular buffer storing G_0 (discounted return from t=0) of recent episodes.
+        # Used by the adaptive baseline (baseline == -1) to estimate E[G_0].
+        # N=500 balances stability (smooth estimate) vs. responsiveness to policy changes.
+        self.g0_history = []
 
 
-    def update_policy(self):
+    def update_policy(self, algorithm='reinforce', baseline=0, normalize=False):
+        # the list of states, actions etc... is moved to local variables. The global variables are reset
+        # at each update
+        
         action_log_probs = torch.stack(self.action_log_probs, dim=0).to(self.train_device).squeeze(-1)
         states = torch.stack(self.states, dim=0).to(self.train_device).squeeze(-1)
         next_states = torch.stack(self.next_states, dim=0).to(self.train_device).squeeze(-1)
         rewards = torch.stack(self.rewards, dim=0).to(self.train_device).squeeze(-1)
         done = torch.Tensor(self.done).to(self.train_device)
 
-        self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
-
-        #
         # TASK 2:
         #   - compute discounted returns
+        G_t = discount_rewards(rewards, self.gamma)
         #   - compute policy gradient loss function given actions and returns
-        #   - compute gradients and step the optimizer
-        #
+        if algorithm == 'reinforce' and done[-1] == True:
+            if baseline == -1:
+                # Adaptive constant baseline.
+                # Estimate the 25th percentile of G_0 from the last 100 observed
+                # discounted returns (N=100 balances stability vs. responsiveness).
+                # Using the 25th percentile instead of the mean keeps the baseline
+                # below the current average return, so the majority of advantages
+                # remain positive and the gradient signal does not collapse when
+                # performance plateaus.
+                #   b = percentile_25(last-500 G_0)
+                # Use pure REINFORCE (baseline=0) for the first 10 episodes so that
+                # all advantages are positive and the policy gets a useful learning signal
+                # from the very start.  Once we have enough history, switch to the
+                # adaptive percentile baseline which stabilises learning at higher performance.
+                if len(self.g0_history) >= 10:
+                    # 25th percentile of recent G_0: keeps the baseline below the
+                    # current average return so ~75% of episodes yield a positive
+                    # advantage at t=0, providing strong gradient signal.
+                    g0_hat = float(np.percentile(self.g0_history[-100:], 25))
+                else:
+                    g0_hat = 0.0
+                baseline_vector = g0_hat
+                advantage = G_t - baseline_vector
+                if normalize:
+                    # Divide by std to normalise gradient magnitude across episodes.
+                    # We do NOT subtract the mean: the baseline already keeps the
+                    # advantages mostly positive, and removing the intra-episode mean
+                    # would discard information about whether this episode was above average.
+                    advantage = advantage / (advantage.std() + 1e-8)
+                # Append current G_0 AFTER using the history so the current episode
+                # does not bias its own baseline estimate.
+                self.g0_history.append(G_t[0].item())
+                actor_loss = (-advantage * action_log_probs).mean()
+            else:
+                # Fixed constant baseline: subtract the same value from every G_t.
+                #   baseline=0  → pure REINFORCE (no baseline)
+                #   baseline=k  → subtract the constant k from every return
+                # If normalize=True, whiten the advantage (zero mean, unit std within
+                # the episode) for scale-invariant gradient updates.
+                advantage = G_t - baseline
+                if normalize:
+                    advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+                actor_loss = (-advantage * action_log_probs).mean()
 
+            # The minus sign turns gradient descent into gradient ascent,
+            # since we want to MAXIMISE expected return.
+            self.optimizer.zero_grad()
+            actor_loss.backward()
+            
+            self.optimizer.step()
+            self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
+            return actor_loss.item(), actor_loss.item()
+        
+        elif algorithm=='actor_critic':
+            #computing bootstrapped estimate, aka R_t+1 + gamma V(S_t+1)
+            current_state = states[-1]
+            next_state = next_states[-1]
+            reward = rewards[-1]
+            if done[-1] == False: 
+                next_value = self.policy(next_state, critic = True) #calculate V(S_t+1)
+                estimate_value = reward + self.gamma*next_value
+            else:
+                # if we are in the terminal state we should't be able to compute V(S_t+1)
+                # Therefore we assume it to be 0
+                estimate_value = reward
 
-        #
-        # TASK 3:
-        #   - compute boostrapped discounted return estimates
-        #   - compute advantage terms
-        #   - compute actor loss and critic loss
-        #   - compute gradients and step the optimizer
-        #
+            #compute the advantage δ_t
+            value = self.policy(current_state, critic = True) #V(S_t)
+            delta = estimate_value.detach() - value
 
-        return        
+            #compute actor and critic loss
+            current_action_log_prob = action_log_probs
+            delta_detached = delta.detach()
+            actor_loss = -delta_detached* current_action_log_prob 
 
+            critic_loss = 0.5 * delta**2
+
+            #Saving the current values of the losses, needed for the train analysis
+            actor_loss_value = actor_loss.item()
+            critic_loss_value = critic_loss.item()
+
+            #compute the gradients
+            self.optimizer.zero_grad() #puts to 0 the gradients. If not used it would be grad = old_grad+new_grad
+
+            critic_loss.backward()
+
+            #step the gradient
+            self.optimizer.step()
+
+            self.optimizer.zero_grad() 
+
+            actor_loss.backward()
+
+            self.optimizer.step()
+
+            #reset the lists after each iteration of the episode
+            self.states, self.next_states, self.action_log_probs, self.rewards, self.done = [], [], [], [], []
+
+            return actor_loss_value, critic_loss_value
+        
+        return None, None
 
     def get_action(self, state, evaluation=False):
-        """ state -> action (3-d), action_log_densities """
+        """Given the current state, return an action and its log-probability.
+
+        During training  (evaluation=False): sample a random action from the
+        policy distribution so the agent can explore.
+        During evaluation (evaluation=True):  return the distribution mean,
+        which is the single best action the policy knows (no randomness).
+        """
+        # Convert the numpy state array coming from the env into a PyTorch tensor
+        # on the correct device (CPU or GPU).
         x = torch.from_numpy(state).float().to(self.train_device)
 
+        # Forward pass: the network returns a Normal distribution N(mu, sigma)
+        # parameterised by the current policy weights.
         normal_dist = self.policy(x)
 
-        if evaluation:  # Return mean
+        if evaluation:  # deterministic: just use the mean of the distribution
             return normal_dist.mean, None
 
-        else:   # Sample from the distribution
-            action = normal_dist.sample()
+        else:   # stochastic: draw one sample from N(mu, sigma)
+            action = normal_dist.sample()   # shape: (action_space,) = (3,)
 
-            # Compute Log probability of the action [ log(p(a[0] AND a[1] AND a[2])) = log(p(a[0])*p(a[1])*p(a[2])) = log(p(a[0])) + log(p(a[1])) + log(p(a[2])) ]
+            # Why do we need log π(a|s)? 
+            # The REINFORCE gradient is:  ∇J = E[ G_t · ∇ log π(a_t|s_t) ]
+            # We need log π(a|s) so PyTorch can differentiate through it
+            # with .backward() later.
+            #
+            # Why sum() over the 3 action dimensions? 
+            # The 3 joints are modelled as *independent* Gaussians, so the
+            # joint probability of taking all 3 actions together is:
+            #
+            #  p(a) = p(a[0]) * p(a[1]) * p(a[2])
+            #
+            # Taking the log turns the product into a sum (log of a product
+            # equals the sum of logs):
+            #
+            #   log p(a) = log p(a[0]) + log p(a[1]) + log p(a[2])
+            #
+            # normal_dist.log_prob(action) gives [log p(a[0]), log p(a[1]), log p(a[2])],
+            # and .sum() collapses them into a single scalar log π(a|s).
             action_log_prob = normal_dist.log_prob(action).sum()
+            #print(action_log_prob)
 
             return action, action_log_prob
 
 
     def store_outcome(self, state, next_state, action_log_prob, reward, done):
+        """Buffer one (s, s', log π(a|s), r, done) transition.
+
+        REINFORCE is a Monte Carlo method: it needs the *complete* episode
+        before it can compute G_t and update the policy.  We therefore store
+        every transition and only call update_policy() at the episode end.
+        """
+        # Store states as plain CPU tensors (no device move yet) to avoid
+        # unnecessary CPU<->GPU transfers; the move happens in update_policy().
         self.states.append(torch.from_numpy(state).float())
         self.next_states.append(torch.from_numpy(next_state).float())
-        self.action_log_probs.append(action_log_prob)
+        self.action_log_probs.append(action_log_prob)  # keeps the computation graph alive
         self.rewards.append(torch.Tensor([reward]))
         self.done.append(done)
-
