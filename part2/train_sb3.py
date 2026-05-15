@@ -10,6 +10,12 @@ python part2/train_sb3.py --env-type source --sampling-strategy none --timesteps
 without normalization
 python part2/train_sb3.py --env-type source --sampling-strategy none --timesteps 300000 --no-vecnormalize
 
+with UDR domain randomization
+python part2/train_sb3.py --env-type source --sampling-strategy udr --timesteps 300000 --mass-range 0.5 2.0
+
+with ADR domain randomization
+python part2/train_sb3.py --env-type source --sampling-strategy adr --timesteps 300000 --mass-range 0.5 2.0 --adr-delta 0.2 --adr-buffer-size 20 --adr-perf-low -25.0 --adr-perf-high -10.0 --adr-boundary-prob 0.8
+
 """
 
 
@@ -41,9 +47,10 @@ class WandbMetricsCallback(BaseCallback):
       - reward/length/success rate per episodio (tracciati step-by-step, no Monitor wrapper necessario)
       - tutte le loss e metriche di training dal logger interno di SB3
     """
-    def __init__(self, log_freq: int = 500, verbose: int = 0):
+    def __init__(self, log_freq: int = 500, sampling_strategy: str = "none", verbose: int = 0):
         super().__init__(verbose)
         self.log_freq = log_freq
+        self.sampling_strategy = sampling_strategy
         # buffer episodio corrente per ogni env
         self._ep_rewards: list[float] = []
         self._ep_lengths: list[int] = []
@@ -95,6 +102,25 @@ class WandbMetricsCallback(BaseCallback):
             # info aggiuntive
             metrics["train/n_episodes"]     = len(self._ep_rewards)
             metrics["train/num_timesteps"]  = self.num_timesteps
+
+            # domain randomization metrics (UDR / ADR)
+            if self.sampling_strategy in ("udr", "adr"):
+                try:
+                    mass_mins = self.training_env.get_attr("_mass_min")
+                    mass_maxs = self.training_env.get_attr("_mass_max")
+                    metrics["dr/mass_min"]         = float(np.mean(mass_mins))
+                    metrics["dr/mass_max"]         = float(np.mean(mass_maxs))
+                    metrics["dr/mass_range_width"] = float(np.mean(
+                        [mx - mn for mn, mx in zip(mass_mins, mass_maxs)]
+                    ))
+                    if self.sampling_strategy == "adr":
+                        sample_types = self.training_env.get_attr("_last_sample_type")
+                        for tag in ("adr_low", "adr_high", "adr_interior"):
+                            metrics[f"dr/{tag}_frac"] = float(
+                                sum(1 for s in sample_types if s == tag) / len(sample_types)
+                            )
+                except Exception:
+                    pass
 
             wandb.log(metrics, step=self.num_timesteps)
         return True
@@ -149,6 +175,55 @@ def parse_args() -> argparse.Namespace:
         "--no-vecnormalize",
         action="store_true",
         help="Disable VecNormalize during training (observation normalization)",
+    )
+    parser.add_argument(
+        "--mass-range",
+        type=float,
+        nargs=2,
+        default=[1.0, 1.0],
+        metavar=("MIN", "MAX"),
+        help="Mass range for domain randomization (min max)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for the randomization wrapper",
+    )
+    parser.add_argument(
+        "--verbose-wrapper",
+        action="store_true",
+        help="Enable verbose output from the randomization wrapper",
+    )
+    parser.add_argument(
+        "--adr-delta",
+        type=float,
+        default=0.2,
+        help="ADR: range increase/decrease size",
+    )
+    parser.add_argument(
+        "--adr-buffer-size",
+        type=int,
+        default=20,
+        help="ADR: performance buffer size for boundary evaluation",
+    )
+    parser.add_argument(
+        "--adr-perf-low",
+        type=float,
+        default=-25.0,
+        help="ADR: mean return below this threshold shrinks the range",
+    )
+    parser.add_argument(
+        "--adr-perf-high",
+        type=float,
+        default=-10.0,
+        help="ADR: mean return above this threshold expands the range",
+    )
+    parser.add_argument(
+        "--adr-boundary-prob",
+        type=float,
+        default=0.8,
+        help="ADR: probability of sampling at the boundary (must be in [0, 1])",
     )
     return parser.parse_args()
 
@@ -273,6 +348,14 @@ def main() -> None:
             "sampling_strategy": args.sampling_strategy,
             "timesteps": args.timesteps,
             "device": device,
+            "mass_range_min": args.mass_range[0],
+            "mass_range_max": args.mass_range[1],
+            "seed": args.seed,
+            "adr_delta": args.adr_delta,
+            "adr_buffer_size": args.adr_buffer_size,
+            "adr_perf_low": args.adr_perf_low,
+            "adr_perf_high": args.adr_perf_high,
+            "adr_boundary_prob": args.adr_boundary_prob,
         }
 
         if use_PPO:
@@ -304,7 +387,7 @@ def main() -> None:
                 model_save_path=f"wandb/{run.id}",
                 verbose=2,
             )
-            step_cb = WandbMetricsCallback(log_freq=500)
+            step_cb = WandbMetricsCallback(log_freq=500, sampling_strategy=args.sampling_strategy)
         else:
             wandb_cb = None
             step_cb = None
@@ -321,8 +404,18 @@ def main() -> None:
                 type=args.env_type,
                 reward_type="dense",
             )
-            
-            env = RandomizationWrapper(env, mode=args.sampling_strategy)
+            env = RandomizationWrapper(
+                env,
+                mode=args.sampling_strategy,
+                mass_range=tuple(args.mass_range),
+                seed=args.seed,
+                verbose=args.verbose_wrapper,
+                adr_delta=args.adr_delta,
+                adr_buffer_size=args.adr_buffer_size,
+                adr_perf_low=args.adr_perf_low,
+                adr_perf_high=args.adr_perf_high,
+                adr_boundary_prob=args.adr_boundary_prob,
+            )
             return env
 
 
