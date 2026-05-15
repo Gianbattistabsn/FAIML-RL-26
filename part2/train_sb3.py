@@ -321,8 +321,8 @@ def main() -> None:
                 type=args.env_type,
                 reward_type="dense",
             )
-            if args.sampling_strategy != "none":
-                env = RandomizationWrapper(env, sampling_strategy=args.sampling_strategy)
+            
+            env = RandomizationWrapper(env, mode=args.sampling_strategy)
             return env
 
 
