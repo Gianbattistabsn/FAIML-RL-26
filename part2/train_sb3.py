@@ -179,11 +179,27 @@ def main() -> None:
             })
 
         if not args.no_wandb:
+            ##############################
+            run_tags = [
+                alg,                             # "ppo" / "sac"
+                args.sampling_strategy,          # "none" / "udr" / "adr"
+                args.env_type,                   # "source" / "target"
+                f"seed{args.seed}",              # "seed42" — group runs of same seed
+                f"ts{args.timesteps // 1000}k",  # "ts300k" — compare run lengths
+                "vecnorm" if not args.no_vecnormalize else "no-vecnorm"
+            ]
+            if args.sampling_strategy == "udr":
+                run_tags += [f"udr_range{args.mass_range[0]:.2f}-{args.mass_range[1]:.2f}"]
+            elif args.sampling_strategy == "adr":
+                run_tags += [f"delta{args.adr_delta:.2f}", f"bp{args.adr_boundary_prob:.2f}"]
+                run_tags += [f"adr_start{(float(args.mass_range[1]) + float(args.mass_range[0])) /2:.2f}"]
+            ##############################
             run = wandb.init(
                 project=args.wandb_project,
                 entity=args.entity,
                 name=args.run_name or save_name.replace("/", "_"),
                 config=base_config,
+                tags=run_tags,
                 sync_tensorboard=False,
                 save_code=True,
             )
@@ -196,7 +212,6 @@ def main() -> None:
         else:
             wandb_cb = None
             step_cb = None
-
 
 
 
