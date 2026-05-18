@@ -81,8 +81,9 @@ class WandbMetricsCallback(BaseCallback):
                             metrics[f"dr/{tag}_frac"] = float(
                                 sum(1 for s in sample_types if s == tag) / len(sample_types)
                             )
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[WandbMetricsCallback] DR metrics skipped: {type(e).__name__}: {e!r}")
+                    raise e
 
             wandb.log(metrics, step=self.num_timesteps)
         return True
