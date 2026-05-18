@@ -68,15 +68,15 @@ class WandbMetricsCallback(BaseCallback):
             # domain randomization metrics (UDR / ADR)
             if self.sampling_strategy in ("udr", "adr"):
                 try:
-                    mass_mins = self.training_env.get_attr("_mass_min")
-                    mass_maxs = self.training_env.get_attr("_mass_max")
+                    mass_mins = self.training_env.get_attr("mass_min")
+                    mass_maxs = self.training_env.get_attr("mass_max")
                     metrics["dr/mass_min"]         = float(np.mean(mass_mins))
                     metrics["dr/mass_max"]         = float(np.mean(mass_maxs))
                     metrics["dr/mass_range_width"] = float(np.mean(
                         [mx - mn for mn, mx in zip(mass_mins, mass_maxs)]
                     ))
                     if self.sampling_strategy == "adr":
-                        sample_types = self.training_env.get_attr("_last_sample_type")
+                        sample_types = self.training_env.get_attr("last_sample_type")
                         for tag in ("adr_low", "adr_high", "adr_interior"):
                             metrics[f"dr/{tag}_frac"] = float(
                                 sum(1 for s in sample_types if s == tag) / len(sample_types)

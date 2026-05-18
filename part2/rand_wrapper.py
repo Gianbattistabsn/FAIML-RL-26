@@ -124,10 +124,21 @@ class RandomizationWrapper(gym.Wrapper):
         # total episode return
         self._episode_return = 0.0
 
-        # Last sampled mass + a tag describing where it came from.
-        self.last_mass = None
         # one of: "none" | "udr" | "adr_low" | "adr_high" | "adr_interior"
         self._last_sample_type: str = "none"
+
+    # attribute getters for wandb logging
+    @property
+    def mass_min(self) -> float:
+        return self._mass_min
+
+    @property
+    def mass_max(self) -> float:
+        return self._mass_max
+
+    @property
+    def last_sample_type(self) -> str:
+        return self._last_sample_type
 
     # -----------------------
     # Mass Sampling
@@ -389,9 +400,6 @@ class RandomizationWrapper(gym.Wrapper):
 
         # sample new mass, returns None if mode is "none"
         new_mass = self._sample_mass()
-
-        # save mass for logging in step
-        # self.last_mass = new_mass
 
         # change object mass if UDR or ADR mode
         if new_mass is not None:
