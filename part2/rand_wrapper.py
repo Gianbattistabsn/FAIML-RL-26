@@ -2,7 +2,6 @@ import gymnasium as gym
 import numpy as np
 
 
-
 class RandomizationWrapper(gym.Wrapper):
     """
     Gym wrapper that applies domain randomization to the environment's physical parameters.
@@ -116,6 +115,8 @@ class RandomizationWrapper(gym.Wrapper):
         # boundary sampling performance buffers
         self._buffer_low = []
         self._buffer_high = []
+        # dynamic performance check buffer
+        self._buffer_interior = []
 
         # boundary flag
         self._current_boundary = None
@@ -123,10 +124,8 @@ class RandomizationWrapper(gym.Wrapper):
         # total episode return
         self._episode_return = 0.0
 
-        # Last sampled mass + a tag describing where it came from. Kept on the
-        # wrapper so external callbacks (e.g. WandB) can read them directly
-        # without parsing info dicts.
-        # self.last_mass = None
+        # Last sampled mass + a tag describing where it came from.
+        self.last_mass = None
         # one of: "none" | "udr" | "adr_low" | "adr_high" | "adr_interior"
         self._last_sample_type: str = "none"
 
@@ -238,7 +237,7 @@ class RandomizationWrapper(gym.Wrapper):
         - If mean reward < `adr_perf_low`: Range shrinks by `adr_delta` (inward).
         - adr_perf_low <= mean_return <= adr_perf_high  -> dead zone, no update
 
-        Expansion is unbounded (canonical ADR behaviour), with the single exception
+        Expansion is unbounded (canonical ADR behavior), with the single exception
         of a physical-plausibility floor `_MIN_PHYSICAL_MASS` enforced on the lower
         boundary so the mass passed to `changeDynamics` cannot become non-positive.
         Retractions are clamped against the opposite dynamic bound so that
@@ -357,11 +356,11 @@ class RandomizationWrapper(gym.Wrapper):
 
             #TODO see if info variable can be integrated with our stuff:
             # expose randomization state for downstream loggers (W&B etc.).
-            # copy first so we don't mutate a dict the underlying env may reuse.
             # info = dict(info)
             # info["rand/mass"] = self._last_mass
             # info["rand/mass_min"] = self._mass_min
             # info["rand/mass_max"] = self._mass_max
+            # info["rand/mass_range_width"] = self._mass_max - self._mass_min
             # info["rand/sample_type"] = self._last_sample_type
 
         return obs, reward, terminated, truncated, info

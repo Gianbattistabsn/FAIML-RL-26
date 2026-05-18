@@ -2,7 +2,6 @@ import gymnasium as gym
 import numpy as np
 
 
-
 class RandomizationWrapper(gym.Wrapper):
     """
     Gym wrapper that applies domain randomization to the environment's physical parameters.
@@ -189,7 +188,7 @@ class RandomizationWrapper(gym.Wrapper):
 
     def _sample_mass_adr(self) -> float:
         """
-        Sample the mass using Automatic Domain Randomization (ADR).
+        Sample the mass using bounded Automatic Domain Randomization (b-ADR).
 
         Generates a mass value dynamically based on performance boundaries. With a
         probability of `adr_boundary_prob`, the method performs boundary sampling
