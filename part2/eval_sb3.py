@@ -7,7 +7,6 @@ python .\part2\eval_sb3.py --model-path ./part2/models/sac_push_none_source_300k
 python .\part2\eval_sb3.py --model-path ./part2/models/sac_push_none_source_300k.zip --episodes 30 --render --no-vecnormalize
 """
 
-import argparse
 import os
 import time
 
@@ -16,6 +15,8 @@ import numpy as np
 from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import panda_gym  # noqa: F401 - required so Panda envs are registered
+
+from parse_arguments import parse_args_eval
 
 
 def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool, env_type: str, use_vecnormalize: bool = True) -> None:
@@ -100,47 +101,8 @@ def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool
         success_rate = float(np.mean(successes))
         print(f"Success rate: {success_rate:.2%}")
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate SAC on PandaPush-v3")
-    parser.add_argument(
-        "--model-path",
-        type=str,
-        required=True,
-        help="Path to a PPO model zip file in format part2/models/{alg}_push_{sampling_strategy}_{env_type}_{args.timesteps // 1000}k)\n (e.g. part2/models/ppo_push_none_source_5k)",
-    )
-    parser.add_argument(
-        "--episodes", 
-        type=int, 
-        default=500, 
-        help="Number of eval episodes"
-    )
-    parser.add_argument(
-        "--stochastic",
-        action="store_true",
-        help="Use stochastic policy sampling instead of deterministic actions",
-    )
-    parser.add_argument(
-        "--render",
-        action="store_true",
-        help="Render with a window (render_mode='human')",
-    )
-    parser.add_argument(
-        "--env-type",
-        type=str, default="target",
-        choices=["source", "target"],
-        help="Type of environment to evaluate on (default: target)",
-    )
-    parser.add_argument(
-        "--no-vecnormalize",
-        action="store_true",
-        help="Disable VecNormalize (skip loading the .pkl stats file)",
-    )
-    return parser.parse_args()
-
-
 if __name__ == "__main__":
-    args = parse_args()
+    args = parse_args_eval()
     evaluate(
         model_path=args.model_path,
         n_episodes=args.episodes,

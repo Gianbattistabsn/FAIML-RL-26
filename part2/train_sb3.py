@@ -14,7 +14,7 @@ import wandb
 from wandb.integration.sb3 import WandbCallback
 
 # internal
-from parse_arguments import parse_args
+from parse_arguments import parse_args_train
 from rand_wrapper import RandomizationWrapper
 from wandb_callback import WandbMetricsCallback
 
@@ -37,7 +37,7 @@ python part2/train_sb3.py --env-type source --sampling-strategy adr --timesteps 
 
 
 def main() -> None:
-    args = parse_args()
+    args = parse_args_train()
 
     # Algorithm selection
     use_PPO = input("use PPO? [y/n]\n>")

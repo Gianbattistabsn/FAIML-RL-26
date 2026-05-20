@@ -1,7 +1,7 @@
 import argparse
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args_train() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train SAC on PandaPush-v3")
     parser.add_argument(
         "--sampling-strategy",
@@ -99,5 +99,43 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.8,
         help="ADR: probability of sampling at the boundary (must be in [0, 1])",
+    )
+    return parser.parse_args()
+
+
+def parse_args_eval() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Evaluate SAC on PandaPush-v3")
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        required=True,
+        help="Path to a PPO model zip file in format part2/models/{alg}_push_{sampling_strategy}_{env_type}_{args.timesteps // 1000}k)\n (e.g. part2/models/ppo_push_none_source_5k)",
+    )
+    parser.add_argument(
+        "--episodes",
+        type=int,
+        default=500,
+        help="Number of eval episodes"
+    )
+    parser.add_argument(
+        "--stochastic",
+        action="store_true",
+        help="Use stochastic policy sampling instead of deterministic actions",
+    )
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        help="Render with a window (render_mode='human')",
+    )
+    parser.add_argument(
+        "--env-type",
+        type=str, default="target",
+        choices=["source", "target"],
+        help="Type of environment to evaluate on (default: target)",
+    )
+    parser.add_argument(
+        "--no-vecnormalize",
+        action="store_true",
+        help="Disable VecNormalize (skip loading the .pkl stats file)",
     )
     return parser.parse_args()
