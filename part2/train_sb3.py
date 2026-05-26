@@ -142,13 +142,13 @@ def main() -> None:
         ppo_n_envs = 8
 
         sac_hparams = {
-            "learning_rate": 3e-4,
+            "learning_rate": 0.0003,
             "buffer_size": int(1e6),
             "batch_size": 256,
             "ent_coef": "auto",
-            "gamma": 0.9812,
+            "gamma": 0.98,
             "tau": 0.005,
-            "learning_starts": 10_000,
+            "learning_starts": 10000,
             "train_freq": 1,
             "gradient_steps": 4,
             "seed": training_seed
