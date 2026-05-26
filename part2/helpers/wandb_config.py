@@ -1,5 +1,7 @@
+import argparse
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3 import PPO, SAC
 import wandb
 
 
@@ -67,23 +69,61 @@ class WandbMetricsCallback(BaseCallback):
 
             # domain randomization metrics (UDR / ADR)
             if self.sampling_strategy in ("udr", "adr"):
-                try:
-                    mass_mins = self.training_env.get_attr("mass_min")
-                    mass_maxs = self.training_env.get_attr("mass_max")
-                    metrics["dr/mass_min"]         = float(np.mean(mass_mins))
-                    metrics["dr/mass_max"]         = float(np.mean(mass_maxs))
-                    metrics["dr/mass_range_width"] = float(np.mean(
-                        [mx - mn for mn, mx in zip(mass_mins, mass_maxs)]
-                    ))
-                    if self.sampling_strategy == "adr":
-                        sample_types = self.training_env.get_attr("last_sample_type")
-                        for tag in ("adr_low", "adr_high", "adr_interior"):
-                            metrics[f"dr/{tag}_frac"] = float(
-                                sum(1 for s in sample_types if s == tag) / len(sample_types)
-                            )
-                except Exception as e:
-                    print(f"[WandbMetricsCallback] DR metrics skipped: {type(e).__name__}: {e!r}")
-                    raise e
-
+                mass_mins = self.training_env.get_attr("mass_min")
+                mass_maxs = self.training_env.get_attr("mass_max")
+                metrics["dr/mass_min"]         = float(np.mean(mass_mins))
+                metrics["dr/mass_max"]         = float(np.mean(mass_maxs))
+                metrics["dr/mass_range_width"] = float(np.mean(
+                    [mx - mn for mn, mx in zip(mass_mins, mass_maxs)]
+                ))
+                if self.sampling_strategy == "adr":
+                    sample_types = self.training_env.get_attr("last_sample_type")
+                    for tag in ("adr_low", "adr_high", "adr_interior"):
+                        metrics[f"dr/{tag}_frac"] = float(
+                            sum(1 for s in sample_types if s == tag) / len(sample_types)
+                        )
             wandb.log(metrics, step=self.num_timesteps)
         return True
+
+def get_wandb_config(alg: str,
+                     args: argparse.Namespace,
+                     device: str,
+                     hparams: dict,
+                     n_envs: int,
+                     model: PPO|SAC) -> tuple[dict, list]:
+    # wandb configuration
+    config = {
+        "algorithm": alg,
+        "env_type": args.env_type,
+        "sampling_strategy": args.sampling_strategy,
+        "timesteps": args.timesteps,
+        "device": device,
+        "mass_range_min": args.mass_range[0],
+        "mass_range_max": args.mass_range[1],
+        "seed": args.seed,
+        "adr_delta": args.adr_delta,
+        "adr_buffer_size": args.adr_buffer_size,
+        "adr_perf_low": args.adr_perf_low,
+        "adr_perf_high": args.adr_perf_high,
+        "adr_boundary_prob": args.adr_boundary_prob,
+        **hparams,
+        "n_envs": n_envs,
+        "vec_normalize": not args.no_vecnormalize,
+        "norm_reward": getattr(model.get_vec_normalize_env(), "norm_reward", False)
+    }
+
+    # set tags for the run
+    run_tags = [
+        alg,  # "ppo" / "sac"
+        args.sampling_strategy,  # "none" / "udr" / "adr"
+        args.env_type,  # "source" / "target"
+        f"seed{args.seed}",  # "seed42" — group runs of same seed
+        f"ts{args.timesteps // 1000}k",  # "ts300k" — compare run lengths
+        "vecnorm" if not args.no_vecnormalize else "no-vecnorm"
+    ]
+    if args.sampling_strategy == "udr":
+        run_tags += [f"udr_range{args.mass_range[0]:.2f}-{args.mass_range[1]:.2f}"]
+    elif args.sampling_strategy == "adr":
+        run_tags += [f"delta{args.adr_delta:.2f}", f"bp{args.adr_boundary_prob:.2f}"]
+        run_tags += [f"adr_start{(float(args.mass_range[1]) + float(args.mass_range[0])) / 2:.2f}"]
+    return config, run_tags

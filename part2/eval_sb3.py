@@ -16,7 +16,7 @@ from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import panda_gym  # noqa: F401 - required so Panda envs are registered
 
-from parse_arguments import parse_args_eval
+from helpers.parse_arguments import parse_args_eval
 
 
 def evaluate(model_path: str, n_episodes: int, deterministic: bool, render: bool, env_type: str, use_vecnormalize: bool = True) -> None:

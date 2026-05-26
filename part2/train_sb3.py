@@ -1,30 +1,21 @@
-# standard library
 import os
 import time
+import random
 
-# external
 import gymnasium as gym
+import numpy as np
 import panda_gym  # type: ignore[import-not-found]
-from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.callbacks import CheckpointCallback
-from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import torch
 import wandb
 from wandb.integration.sb3 import WandbCallback
 
-# internal
-from parse_arguments import parse_args_train
-from rand_wrapper import RandomizationWrapper
-from wandb_callback import WandbMetricsCallback
-import random
-import numpy as np
+from helpers.parse_arguments import parse_args_train
+from helpers.wandb_config import WandbMetricsCallback, get_wandb_config
+from helpers.load_model import load_model
+from helpers.make_model import make_model
 
-
-
-# first time only:
-# >pip install wandb
-# >wandb login
 """
 with normalization
 python part2/train_sb3.py --env-type source --sampling-strategy none --timesteps 300000
@@ -39,330 +30,102 @@ with ADR domain randomization
 python part2/train_sb3.py --env-type source --sampling-strategy adr --timesteps 300000 --mass-range 0.5 2.0 --adr-delta 0.2 --adr-buffer-size 20 --adr-perf-low -25.0 --adr-perf-high -10.0 --adr-boundary-prob 0.8
 """
 
-
 def main() -> None:
+    """
+    Main function, trains a new model from scratch or loads an existing one.
+    Offers the possibility to render at the end.
+    """
+    # get args
     args = parse_args_train()
 
-    # Algorithm selection
-    use_PPO = input("use PPO? [y/n]\n>")
-    if (use_PPO == 'y'):
-        use_PPO = True
-        alg = "ppo"
-    else:
-        use_PPO = False
-        alg = "sac"
-
-
-
+    # seed environment
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
-    
 
+    # algorithm selection
+    if input("use PPO? [y/n]\n>") == 'y':
+        alg = "ppo"
+    else:
+        alg = "sac"
 
-
-    # Model's path (for saving if we will train it, or loading if we already have it)
+    # model's path (for saving if we will train it, or loading if we already have it)
     save_name = f"part2/models/{alg}_push_{args.sampling_strategy}_{args.env_type}_{args.timesteps // 1000}k"
 
-
-    # If the model being requested (algorithm + timesteps) was already trained, it can be loaded
-    load = input("want to load model? [y/n]\n>")
-    if (load == 'y'):
-        load = True
+    # if the model being requested (algorithm + timesteps) was already trained, it can be loaded
+    if input("Want to load existing model? [y/n]\n>") == 'y':
+        model = load_model(args, save_name, alg)
     else:
-        load = False
+        # make model
+        model, n_envs, hparams, device = make_model(alg, save_name, args)
 
+        # callbacks
+        callbacks = [CheckpointCallback(
+            save_freq=200000,
+            save_path=f"{save_name}/checkpoints",
+            name_prefix="model")
+        ]
 
-
-    if load:
-
-        # Creation of one vectorized environment
-        load_vec_env = make_vec_env(
-            lambda: gym.make("PandaPush-v3", render_mode="rgb_array",
-                             type=args.env_type, reward_type="dense"),
-            n_envs=1,
-        )
-
-        # Loading of its normalization if the model was trained with normalization on
-        vecnorm_path = f"{save_name}_vecnormalize.pkl"
-        if os.path.exists(vecnorm_path):
-            load_vec_env = VecNormalize.load(vecnorm_path, load_vec_env)
-            load_vec_env.training = False
-            load_vec_env.norm_reward = False
-            print(f"VecNormalize stats loaded from {vecnorm_path}")
-        else:
-            print(f"[WARNING] {vecnorm_path} not found, model loaded without normalization")
-
-        if use_PPO:
-            model = PPO.load(f"{save_name}.zip", env=load_vec_env)
-        else:
-            model = SAC.load(f"{save_name}.zip", env=load_vec_env)
-
-
-
-
-    # Model has to be trained
-    else:
-        print(torch.cuda.is_available())
-        print(torch.cuda.device_count())
-        print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU")
-        print(torch.version.cuda)
-        
-        # Check for GPU availability
-        use_gpu = True
-        if use_gpu:
-            device = "cuda" if torch.cuda.is_available() else "xpu" if torch.xpu.is_available() else "cpu"
-        
-        else:
-            device = "cpu"
-        
-        
-        print("using", device)
-
-
-        # Parameters configuration, only worry about the algorithm you want to train right now
-        ppo_hparams = {
-            "learning_rate": 5e-4,
-            "n_steps": 4096,
-            "batch_size": 512,
-            "n_epochs": 8,
-            "clip_range": 0.15,
-            "gamma": 0.995,
-            "gae_lambda": 0.95,
-            "ent_coef": 0.005,
-            "vf_coef": 0.5,
-            "max_grad_norm": 0.5,
-            "normalize_advantage": True,
-            "seed": args.seed
-        }
-        # Choose the number of environments to use during PPO training for paralellization
-        ppo_n_envs = 8
-
-        sac_hparams = {
-            "learning_rate": 0.0003,
-            "buffer_size": int(1e6),
-            "batch_size": 256,
-            "ent_coef": "auto",
-            "gamma": 0.98,
-            "tau": 0.005,
-            "learning_starts": 10000,
-            "train_freq": 1,
-            "gradient_steps": 4,
-            "seed": args.seed
-        }
-        # Choose the number of environments to use during SAC training for paralellization
-        sac_n_envs = 4
-
-        
-
-
-
-        # wandb configuration
-        base_config = {
-            "algorithm": alg,
-            "env_type": args.env_type,
-            "sampling_strategy": args.sampling_strategy,
-            "timesteps": args.timesteps,
-            "device": device,
-            "mass_range_min": args.mass_range[0],
-            "mass_range_max": args.mass_range[1],
-            "seed": args.seed,
-            "adr_delta": args.adr_delta,
-            "adr_buffer_size": args.adr_buffer_size,
-            "adr_perf_low": args.adr_perf_low,
-            "adr_perf_high": args.adr_perf_high,
-            "adr_boundary_prob": args.adr_boundary_prob,
-            "training_seed": args.seed
-        }
-
-        if use_PPO:
-            base_config.update({
-                **ppo_hparams,
-                "n_envs": ppo_n_envs,
-                "vec_normalize": not args.no_vecnormalize,
-                "norm_reward": not args.no_vecnormalize,
-            })
-        else:
-            base_config.update({
-                **sac_hparams,
-                "n_envs": sac_n_envs,
-                "vec_normalize": not args.no_vecnormalize,
-                "norm_reward": False,
-            })
-
+        # wandb setup
         if not args.no_wandb:
-            ##############################
-            run_tags = [
-                alg,                             # "ppo" / "sac"
-                args.sampling_strategy,          # "none" / "udr" / "adr"
-                args.env_type,                   # "source" / "target"
-                f"seed{args.seed}",              # "seed42" — group runs of same seed
-                f"ts{args.timesteps // 1000}k",  # "ts300k" — compare run lengths
-                "vecnorm" if not args.no_vecnormalize else "no-vecnorm"
-            ]
-            if args.sampling_strategy == "udr":
-                run_tags += [f"udr_range{args.mass_range[0]:.2f}-{args.mass_range[1]:.2f}"]
-            elif args.sampling_strategy == "adr":
-                run_tags += [f"delta{args.adr_delta:.2f}", f"bp{args.adr_boundary_prob:.2f}"]
-                run_tags += [f"adr_start{(float(args.mass_range[1]) + float(args.mass_range[0])) /2:.2f}"]
-            ##############################
+
+            # get wandb stuff
+            config, run_tags = get_wandb_config(alg, args, device, hparams, n_envs, model)
+
+            # init run
             run = wandb.init(
                 project=args.wandb_project,
                 entity=args.entity,
                 name=args.run_name or save_name.replace("/", "_"),
-                config=base_config,
+                config=config,
                 tags=run_tags,
                 sync_tensorboard=False,
                 save_code=True,
             )
+            # add wandb callbacks
             wandb_cb = WandbCallback(
                 gradient_save_freq=1000,
                 model_save_path=f"wandb/{run.id}",
                 verbose=2,
             )
             step_cb = WandbMetricsCallback(log_freq=500, sampling_strategy=args.sampling_strategy)
-        else:
-            wandb_cb = None
-            step_cb = None
+            callbacks += [wandb_cb, step_cb]
+
+        # train model
+        model.learn(
+            total_timesteps = args.timesteps,
+            callback = callbacks,
+            progress_bar = True,
+        )
 
 
-
-
-        # Custom 'make_env' function to properly use domain randomization if selected
-        def make_env():
-            env = gym.make(
-                "PandaPush-v3",
-                render_mode="rgb_array",
-                type=args.env_type,
-                reward_type="dense",
-            )
-            env = RandomizationWrapper(
-                env,
-                mode=args.sampling_strategy,
-                mass_range=tuple(args.mass_range),
-                seed=args.seed,
-                verbose=args.verbose_wrapper,
-                adr_delta=args.adr_delta,
-                adr_buffer_size=args.adr_buffer_size,
-                adr_perf_low=args.adr_perf_low,
-                adr_perf_high=args.adr_perf_high,
-                adr_boundary_prob=args.adr_boundary_prob,
-            )
-            return env
-
-
-
-
-
-
-        # Actual model configuration
-        if (use_PPO):
-
-            # Creation of multiple vectorized environments to parallelize training
-            vec_env = make_vec_env(make_env, n_envs=ppo_n_envs, seed = args.seed)
-
-            # Enabling environment normalization if requested
-            if not args.no_vecnormalize:
-                vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
-                vec_env.training = True
-                vec_env.norm_reward = True
-
-
-            # Model creation with selected parameters
-            model = PPO(
-                policy="MultiInputPolicy",
-                env=vec_env,
-                device=device,
-                verbose=1,
-                tensorboard_log=f"{save_name}/logs",
-
-                **ppo_hparams
-            )
-
-            checkpoint_cb = CheckpointCallback(
-                save_freq = 200000,
-                save_path = f"{save_name}/checkpoints",
-                name_prefix = "model",
-            )
-
-            callbacks = [checkpoint_cb] + ([wandb_cb, step_cb] if wandb_cb else [])
-
-            # Model training
-            model.learn(
-                total_timesteps = args.timesteps,
-                callback = callbacks,
-                progress_bar = True,
-            )
-
-
-        # Same structure as PPO above
-        else:
-            vec_env = make_vec_env(make_env, n_envs=sac_n_envs, seed = args.seed)
-
-            if not args.no_vecnormalize:
-                vec_env = VecNormalize(
-                    vec_env,
-                    norm_obs=True,
-                    norm_reward=False,
-                )
-
-            model = SAC(
-                policy="MultiInputPolicy",
-                env=vec_env,
-                device=device,
-                verbose=1,        
-                tensorboard_log=f"{save_name}/logs",
-
-                **sac_hparams
-            )
-
-            checkpoint_cb = CheckpointCallback(
-                save_freq = 200000,
-                save_path = f"{save_name}/checkpoints",
-                name_prefix = "model",
-            )
-
-            callbacks = [checkpoint_cb] + ([wandb_cb, step_cb] if wandb_cb else [])
-
-            model.learn(
-                total_timesteps = args.timesteps,
-                callback = callbacks,
-                progress_bar = True,
-            )
-
-
-        # Saving model as .zip file
+        # save model as .zip (+ .pkl if vecnorm)
         model.save(save_name)
+        vec_env = model.get_vec_normalize_env()
         if not args.no_vecnormalize and isinstance(vec_env, VecNormalize):
             vec_env.save(f"{save_name}_vecnormalize.pkl")
         print(f"Model saved to {save_name}.zip")
 
+        # end wandb run
         if not args.no_wandb:
             wandb.finish()
 
-
-
-
-
-
-
-    # Decide wether to render some episodes or not, regardless of model being trained or loaded
-    render = input("want to render? [y/n]\n>")
-    if (render == 'y'):
-
-        # Setting up the proper environment
+    # Decide whether to render some episodes or not, regardless of model being trained or loaded
+    if input("want to render? [y/n]\n>") == 'y':
+        # setup environment
         env_type_render = args.env_type
-        render_env = DummyVecEnv([lambda: gym.make(
-            "PandaPush-v3",
-            render_mode="human",
-            type=env_type_render,
-            reward_type="dense",
-        )])
+        render_env = DummyVecEnv([
+            lambda: gym.make(
+                id="PandaPush-v3",
+                render_mode="human",
+                type=env_type_render,
+                reward_type="dense"
+            )
+        ])
 
-
-        # If the model was trained with env normalization, load the normalized env
+        # load the normalized env if needed
         vecnorm_path = f"{save_name}_vecnormalize.pkl"
         if os.path.exists(vecnorm_path):
             render_env = VecNormalize.load(vecnorm_path, render_env)
@@ -372,8 +135,7 @@ def main() -> None:
         else:
             print(f"[WARNING] {vecnorm_path} not found, rendering without normalization")
 
-
-        # Start rendering
+        # start rendering
         render = True
         while render:
             n_episodes = int(input("insert n_episodes:\n>"))
@@ -407,7 +169,7 @@ def main() -> None:
                 print(f"{'='*40}")
                 time.sleep(1)
 
-            # Ask wether to keep rendering or not
+            # Ask whether to keep rendering or not
             render = input("\nwant to render again? [y/n]\n>")
             render = (render == 'y')
 
