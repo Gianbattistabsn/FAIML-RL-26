@@ -53,13 +53,12 @@ def main() -> None:
         alg = "sac"
 
 
-    training_seed = 42
 
-    random.seed(training_seed)
-    np.random.seed(training_seed)
-    torch.manual_seed(training_seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(training_seed)
+        torch.cuda.manual_seed_all(args.seed)
     
 
 
@@ -136,7 +135,7 @@ def main() -> None:
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             "normalize_advantage": True,
-            "seed": training_seed
+            "seed": args.seed
         }
         # Choose the number of environments to use during PPO training for paralellization
         ppo_n_envs = 8
@@ -151,7 +150,7 @@ def main() -> None:
             "learning_starts": 10000,
             "train_freq": 1,
             "gradient_steps": 4,
-            "seed": training_seed
+            "seed": args.seed
         }
         # Choose the number of environments to use during SAC training for paralellization
         sac_n_envs = 4
@@ -175,7 +174,7 @@ def main() -> None:
             "adr_perf_low": args.adr_perf_low,
             "adr_perf_high": args.adr_perf_high,
             "adr_boundary_prob": args.adr_boundary_prob,
-            "training_seed": training_seed
+            "training_seed": args.seed
         }
 
         if use_PPO:
@@ -262,7 +261,7 @@ def main() -> None:
         if (use_PPO):
 
             # Creation of multiple vectorized environments to parallelize training
-            vec_env = make_vec_env(make_env, n_envs=ppo_n_envs, seed = training_seed)
+            vec_env = make_vec_env(make_env, n_envs=ppo_n_envs, seed = args.seed)
 
             # Enabling environment normalization if requested
             if not args.no_vecnormalize:
@@ -300,7 +299,7 @@ def main() -> None:
 
         # Same structure as PPO above
         else:
-            vec_env = make_vec_env(make_env, n_envs=sac_n_envs, seed = training_seed)
+            vec_env = make_vec_env(make_env, n_envs=sac_n_envs, seed = args.seed)
 
             if not args.no_vecnormalize:
                 vec_env = VecNormalize(
