@@ -62,7 +62,7 @@ def parse_args_train() -> argparse.Namespace:
     parser.add_argument(
         "--seed",
         type=int,
-        default=42,
+        default=51,
         help="Random seed for the randomization wrapper",
     )
     parser.add_argument(
