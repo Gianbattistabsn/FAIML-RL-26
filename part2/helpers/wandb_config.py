@@ -68,7 +68,7 @@ class WandbMetricsCallback(BaseCallback):
             metrics["train/num_timesteps"]  = self.num_timesteps
 
             # domain randomization metrics (UDR / ADR)
-            if self.sampling_strategy in ("udr", "adr"):
+            if self.sampling_strategy in ("udr", "adr", "badr"):
                 mass_mins = self.training_env.get_attr("mass_min")
                 mass_maxs = self.training_env.get_attr("mass_max")
                 metrics["dr/mass_min"]         = float(np.mean(mass_mins))
@@ -76,7 +76,7 @@ class WandbMetricsCallback(BaseCallback):
                 metrics["dr/mass_range_width"] = float(np.mean(
                     [mx - mn for mn, mx in zip(mass_mins, mass_maxs)]
                 ))
-                if self.sampling_strategy == "adr":
+                if self.sampling_strategy in ("adr", "badr"):
                     sample_types = self.training_env.get_attr("last_sample_type")
                     for tag in ("adr_low", "adr_high", "adr_interior"):
                         metrics[f"dr/{tag}_frac"] = float(
@@ -115,7 +115,7 @@ def get_wandb_config(alg: str,
     # set tags for the run
     run_tags = [
         alg,  # "ppo" / "sac"
-        args.sampling_strategy,  # "none" / "udr" / "adr"
+        args.sampling_strategy,  # "none" / "udr" / "adr" / "badr
         args.env_type,  # "source" / "target"
         f"seed{args.seed}",  # "seed42" — group runs of same seed
         f"ts{args.timesteps // 1000}k",  # "ts300k" — compare run lengths
@@ -126,4 +126,8 @@ def get_wandb_config(alg: str,
     elif args.sampling_strategy == "adr":
         run_tags += [f"delta{args.adr_delta:.2f}", f"bp{args.adr_boundary_prob:.2f}"]
         run_tags += [f"adr_start{(float(args.mass_range[1]) + float(args.mass_range[0])) / 2:.2f}"]
+    elif args.sampling_strategy == "badr":
+        run_tags += [f"delta{args.adr_delta:.2f}", f"bp{args.adr_boundary_prob:.2f}"]
+        run_tags += [f"badr_start{(float(args.mass_range[1]) + float(args.mass_range[0])) / 2:.2f}"]
+        run_tags += [f"badr_limits{args.mass_range[0]:.2f}-{args.mass_range[1]:.2f}"]
     return config, run_tags

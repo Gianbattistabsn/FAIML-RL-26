@@ -23,7 +23,6 @@ class RandomizationWrapper(gym.Wrapper):
             inward (clamped so that `_mass_min <= _mass_max` always holds).
         seed (int, optional): Seed for the internal random number generator to ensure
             reproducibility.
-        verbose (bool): If True, enables detailed logging of the randomization process.
         adr_delta (float): The step size used to expand or retract the randomization boundaries
             during ADR. Must be positive.
         adr_buffer_size (int): The number of boundary episodes to evaluate before triggering
@@ -53,7 +52,6 @@ class RandomizationWrapper(gym.Wrapper):
                  mode: str = "none",
                  mass_range: tuple[float, float] = (1.0, 1.0),
                  seed: int = None,
-                 verbose: bool = False,
                  *,  # adr specific from here, require full kwargs
                  adr_delta: float = 0.2,          # range increase size
                  adr_buffer_size: int = 20,       # performance buffer size for boundary performance evaluation
@@ -65,8 +63,8 @@ class RandomizationWrapper(gym.Wrapper):
         super().__init__(env)
 
         # mode check
-        if mode not in {"none", "udr", "adr"}:
-            raise ValueError(f"Unknown mode={mode}; expected one of 'none', 'udr', 'adr'.")
+        if mode not in {"none", "udr", "adr", "badr"}:
+            raise ValueError(f"Unknown mode={mode}; expected one of 'none', 'udr', 'adr', 'badr'.")
         self.mode = mode
 
         # range check
@@ -75,7 +73,11 @@ class RandomizationWrapper(gym.Wrapper):
                 f"Invalid mass_range={mass_range}: lower bound must be less than or equal to upper bound,"
                 f" and greater than or equal to {self._MIN_PHYSICAL_MASS}."
             )
-        if mode == "adr":
+
+        # limits for b-adr
+        self._mass_min_limit, self._mass_max_limit = mass_range
+
+        if mode == "adr" or mode == "badr":
             # ADR: initialize the distribution to a single point
             self._mass_min = self._mass_max = (mass_range[0] + mass_range[1]) / 2
         else:
@@ -83,9 +85,6 @@ class RandomizationWrapper(gym.Wrapper):
 
         # random number generator
         self._rng = np.random.default_rng(seed)
-
-        # verbose flag
-        self.verbose = verbose
 
         # --- adr specific attributes ---
         # range increase size check
@@ -115,8 +114,6 @@ class RandomizationWrapper(gym.Wrapper):
         # boundary sampling performance buffers
         self._buffer_low = []
         self._buffer_high = []
-        # dynamic performance check buffer
-        self._buffer_interior = []
 
         # boundary flag
         self._current_boundary = None
@@ -172,12 +169,12 @@ class RandomizationWrapper(gym.Wrapper):
         elif self.mode == "udr":
             return self._sample_mass_udr()
 
-        # Automatic Domain Randomization mode
-        elif self.mode == "adr":
+        # Automatic Domain Randomization mode, canonical or bounded
+        elif self.mode == "adr" or self.mode == "badr":
             return self._sample_mass_adr()
 
         else: # unreachable
-            raise ValueError(f"Unknown mode={self.mode}; expected one of 'none', 'udr', 'adr'.")
+            raise ValueError(f"Unknown mode={self.mode}; expected one of 'none', 'udr', 'adr', 'badr'.")
 
     def _sample_mass_udr(self) -> float:
         """
@@ -259,7 +256,7 @@ class RandomizationWrapper(gym.Wrapper):
             Clears the evaluated performance buffer (`_buffer_low` or `_buffer_high`).
             Prints update logs if `self.verbose` is True.
         """
-        # lower boundary update
+        # lower boundary update if buffer size reached
         if len(self._buffer_low) >= self.adr_buffer_size:
 
             # compute mean return over the buffer_low
@@ -267,24 +264,11 @@ class RandomizationWrapper(gym.Wrapper):
 
             # expand lower boundary if mean_return is above the upper threshold
             if mean_return > self.adr_perf_high:
-                # clamped against the physical-plausibility floor: mass must stay strictly positive
-                self._mass_min = max(self._mass_min - self.adr_delta, self._MIN_PHYSICAL_MASS)
-
-                # log boundary expansion update
-                if self.verbose:
-                    print(f"[adr] mass_min expanded to {self._mass_min:.3f} (mean_return={mean_return:.2f} > {self.adr_perf_high})")
+                self._expand_bound("low")
 
             # retract lower boundary if mean_return is below the lower threshold
             elif mean_return < self.adr_perf_low:
-                self._mass_min = min(self._mass_min + self.adr_delta, self._mass_max)  # bounded by self._mass_max
-
-                # log boundary retraction update
-                if self.verbose:
-                    print(f"[adr] mass_min retracted to {self._mass_min:.3f} (mean_return={mean_return:.2f} < {self.adr_perf_low})")
-
-            # dead zone: adr_perf_low <= mean_return <= adr_perf_high -> no change
-            elif self.verbose:
-                print(f"[adr] mass_min held at {self._mass_min:.3f} (mean_return={mean_return:.2f} in [{self.adr_perf_low}, {self.adr_perf_high}])")
+                self._retract_bound("low")
 
             # reset buffer
             self._buffer_low = []
@@ -297,37 +281,42 @@ class RandomizationWrapper(gym.Wrapper):
 
             # expand upper boundary if mean_return is above the upper threshold
             if mean_return > self.adr_perf_high:
-                self._mass_max = self._mass_max + self.adr_delta
-
-                # log boundary expansion update
-                if self.verbose:
-                    print(f"[adr] mass_max expanded to {self._mass_max:.3f} (mean_return={mean_return:.2f} > {self.adr_perf_high})")
+                self._expand_bound("high")
 
             # retract upper boundary if mean_return is below the lower threshold
             elif mean_return < self.adr_perf_low:
-                self._mass_max = max(self._mass_max - self.adr_delta, self._mass_min)  # bounded by self._mass_min
-
-                # log boundary retraction update
-                if self.verbose:
-                    print(f"[adr] mass_max retracted to {self._mass_max:.3f} (mean_return={mean_return:.2f} < {self.adr_perf_low})")
-
-            # dead zone: adr_perf_low <= mean_return <= adr_perf_high -> no change
-            elif self.verbose:
-                print(f"[adr] mass_max held at {self._mass_max:.3f} (mean_return={mean_return:.2f} in [{self.adr_perf_low}, {self.adr_perf_high}])")
+                self._retract_bound("high")
 
             # reset buffer
             self._buffer_high = []
 
-    def _update_boundaries_dynamic(self) -> None:
-        """
-        Evaluate dynamic relative boundary updates (Placeholder).
+    def _expand_bound(self, bound: str):
+        if bound == "low":
+            if self.mode == "adr":
+                # clamped against the physical-plausibility floor: mass must stay strictly positive
+                self._mass_min = max(self._mass_min - self.adr_delta, self._MIN_PHYSICAL_MASS)
+            else:   # b-adr
+                # clamped against the mass inferior limit
+                self._mass_min = max(self._mass_min - self.adr_delta, self._mass_min_limit)
 
-        Currently uninstantiated. Intended to implement boundary expansions/retractions
-        based on relative dynamic statistics (e.g., historical moving averages of returns)
-        instead of hardcoded, static reward thresholds.
-        """
-        #TODO idea: what if we did dynamic mean_return checking against a previous return or some statistic of previous returns, instead of hard reward thresholds? ask
-        pass
+        # bound = high
+        else:
+            if self.mode == "adr":
+                # unlimited expansion of upper bound
+                self._mass_max = self._mass_max + self.adr_delta
+            else:   # b-adr
+                # clamped against the mass superior limit
+                self._mass_max = min(self._mass_max + self.adr_delta, self._mass_max_limit)
+
+    def _retract_bound(self, bound: str):
+        if bound == "low":
+            # clamped against self._mass_max to preserve interval sanity
+            self._mass_min = min(self._mass_min + self.adr_delta, self._mass_max)
+
+        # bound = high
+        else:
+            #  clamped against self._mass_min to preserve interval sanity
+            self._mass_max = max(self._mass_max - self.adr_delta, self._mass_min)
 
     # -----------------------
     # Step
@@ -351,28 +340,19 @@ class RandomizationWrapper(gym.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
 
         # update total episode return if adr
-        if self.mode == "adr":
+        if self.mode in ("adr", "badr"):
             self._episode_return += float(reward)
 
         # episode ended ?
         done = terminated or truncated #TODO we can try to see what happens if truncated is not considered for performance evaluation
 
         # if episode ended and adr mode has done boundary sampling, update relative buffer
-        if done and self.mode == "adr" and self._current_boundary is not None:
+        if done and self.mode in ("adr", "badr") and self._current_boundary is not None:
             if self._current_boundary == "low":
                 self._buffer_low.append(self._episode_return)
             else:  # "high"
                 self._buffer_high.append(self._episode_return)
             self._update_boundaries()
-
-            #TODO see if info variable can be integrated with our stuff:
-            # expose randomization state for downstream loggers (W&B etc.).
-            # info = dict(info)
-            # info["rand/mass"] = self._last_mass
-            # info["rand/mass_min"] = self._mass_min
-            # info["rand/mass_max"] = self._mass_max
-            # info["rand/mass_range_width"] = self._mass_max - self._mass_min
-            # info["rand/sample_type"] = self._last_sample_type
 
         return obs, reward, terminated, truncated, info
 
@@ -409,12 +389,6 @@ class RandomizationWrapper(gym.Wrapper):
             sim.physics_client.changeDynamics(bodyUniqueId=object_body_id,
                                               linkIndex=-1,
                                               mass=float(new_mass))
-
-            # log change
-            if self.verbose:                                                    #TODO see what print is better
-                print(f"[{self.mode}] mass={new_mass:.2f} "                     # print(f"[{self.mode}] mass={new_mass:.3f}")
-                      f"range=[{self._mass_min:.2f},{self._mass_max:.2f}] "     # print(f"range=[{self.mass_min:.3f},{self.mass_max:.3f}]")
-                      f"type={self._last_sample_type}")                         # print(f"type={self.last_sample_type}")
 
         # apply parent class reset
         return super().reset(**kwargs)

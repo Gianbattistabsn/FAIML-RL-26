@@ -7,7 +7,7 @@ def parse_args_train() -> argparse.Namespace:
         "--sampling-strategy",
         type=str,
         default="none",
-        choices=["none", "udr", "adr"],
+        choices=["none", "udr", "adr", "badr"],
         help="Sampling strategy for the object mass",
     )
     parser.add_argument(
@@ -64,11 +64,6 @@ def parse_args_train() -> argparse.Namespace:
         type=int,
         default=51,
         help="Random seed for the randomization wrapper",
-    )
-    parser.add_argument(
-        "--verbose-wrapper",
-        action="store_true",
-        help="Enable verbose output from the randomization wrapper",
     )
     parser.add_argument(
         "--adr-delta",

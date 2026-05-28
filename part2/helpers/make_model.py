@@ -31,14 +31,15 @@ def make_model(alg: str,
             - device (str): The resolved device string ("cuda", "xpu", or "cpu").
     """
     device = "cuda" if (use_cuda and torch.cuda.is_available()) \
-        else "xpu" if (use_cuda and torch.xpu.is_available()) \
+        else "xpu" if (use_cuda and hasattr(torch, "xpu") and torch.xpu.is_available()) \
         else "cpu"
     if verbose:
-        print(torch.cuda.is_available())
-        print(torch.cuda.device_count())
-        print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU")
-        print(torch.version.cuda)
-        print("Device in use:", device)
+        print(f"CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"CUDA devices count: {torch.cuda.device_count()}")
+            print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
+            print(f"CUDA toolkit: {torch.version.cuda}")
+            print(f"Device in use: {device}")
 
     if alg == "ppo":
         return _make_ppo(save_name, args, device)

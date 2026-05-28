@@ -30,7 +30,6 @@ def make_env(args: argparse.Namespace) -> gym.Env:
         mode=args.sampling_strategy,
         mass_range=tuple(args.mass_range),
         seed=args.seed,
-        verbose=args.verbose_wrapper,
         adr_delta=args.adr_delta,
         adr_buffer_size=args.adr_buffer_size,
         adr_perf_low=args.adr_perf_low,
