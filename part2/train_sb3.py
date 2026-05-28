@@ -28,6 +28,9 @@ python part2/train_sb3.py --env-type source --sampling-strategy udr --timesteps 
 
 with ADR domain randomization
 python part2/train_sb3.py --env-type source --sampling-strategy adr --timesteps 300000 --mass-range 0.5 2.0 --adr-delta 0.2 --adr-buffer-size 20 --adr-perf-low -25.0 --adr-perf-high -10.0 --adr-boundary-prob 0.8
+
+with BADR domain randomization
+python part2/train_sb3.py --env-type source --sampling-strategy badr --timesteps 300000 --mass-range 0.5 2.0 --adr-delta 0.2 --adr-buffer-size 20 --adr-perf-low -25.0 --adr-perf-high -10.0 --adr-boundary-prob 0.8
 """
 
 def main() -> None:

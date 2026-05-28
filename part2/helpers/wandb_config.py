@@ -115,10 +115,10 @@ def get_wandb_config(alg: str,
     # set tags for the run
     run_tags = [
         alg,  # "ppo" / "sac"
-        args.sampling_strategy,  # "none" / "udr" / "adr" / "badr
+        args.sampling_strategy,  # "none" / "udr" / "adr" / "badr"
         args.env_type,  # "source" / "target"
         f"seed{args.seed}",  # "seed42" — group runs of same seed
-        f"ts{args.timesteps // 1000}k",  # "ts300k" — compare run lengths
+        f"ts{args.timesteps // 1000}k",  # "ts600k" — compare run lengths
         "vecnorm" if not args.no_vecnormalize else "no-vecnorm"
     ]
     if args.sampling_strategy == "udr":

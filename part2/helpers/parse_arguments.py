@@ -69,31 +69,31 @@ def parse_args_train() -> argparse.Namespace:
         "--adr-delta",
         type=float,
         default=0.2,
-        help="ADR: range increase/decrease size",
+        help="ADR/BADR: range increase/decrease size",
     )
     parser.add_argument(
         "--adr-buffer-size",
         type=int,
         default=20,
-        help="ADR: performance buffer size for boundary evaluation",
+        help="ADR/BADR: performance buffer size for boundary evaluation",
     )
     parser.add_argument(
         "--adr-perf-low",
         type=float,
         default=-25.0,
-        help="ADR: mean return below this threshold shrinks the range",
+        help="ADR/BADR: mean return below this threshold shrinks the range",
     )
     parser.add_argument(
         "--adr-perf-high",
         type=float,
         default=-10.0,
-        help="ADR: mean return above this threshold expands the range",
+        help="ADR/BADR: mean return above this threshold expands the range",
     )
     parser.add_argument(
         "--adr-boundary-prob",
         type=float,
         default=0.8,
-        help="ADR: probability of sampling at the boundary (must be in [0, 1])",
+        help="ADR/BADR: probability of sampling at the boundary (must be in [0, 1])",
     )
     return parser.parse_args()
 

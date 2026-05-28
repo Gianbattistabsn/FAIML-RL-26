@@ -11,8 +11,7 @@ def make_env(args: argparse.Namespace) -> gym.Env:
     which calls it once per parallel worker. The returned environment is a `PandaPush-v3`
     instance with a dense reward, configured for the requested `env_type` ("source" or
     "target"), and wrapped in a `RandomizationWrapper` that controls object-mass
-    randomization according to the configured `sampling_strategy` ("none", "udr", or "adr").
-
+    randomization according to the configured `sampling_strategy` ("none", "udr", "adr", "badr").
 
     :param args: Parsed CLI arguments.
 
