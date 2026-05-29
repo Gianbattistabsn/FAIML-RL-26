@@ -113,6 +113,17 @@ def parse_args_eval() -> argparse.Namespace:
         help="Number of eval episodes"
     )
     parser.add_argument(
+        "--env-type",
+        type=str, default="target",
+        choices=["source", "target"],
+        help="Type of environment to evaluate on (default: target)",
+    )
+    parser.add_argument(
+        "--masses", type=float, nargs="+",
+        default=[1.0],
+        help="One or more object masses to evaluate at (kg)",
+    )
+    parser.add_argument(
         "--stochastic",
         action="store_true",
         help="Use stochastic policy sampling instead of deterministic actions",
@@ -121,12 +132,6 @@ def parse_args_eval() -> argparse.Namespace:
         "--render",
         action="store_true",
         help="Render with a window (render_mode='human')",
-    )
-    parser.add_argument(
-        "--env-type",
-        type=str, default="target",
-        choices=["source", "target"],
-        help="Type of environment to evaluate on (default: target)",
     )
     parser.add_argument(
         "--no-vecnormalize",
