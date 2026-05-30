@@ -114,18 +114,23 @@ def evaluate(model_path: str,
 
     env.close()
 
-    print("Masses check")
+    print(f"\n==== TOTAL SUMMARY ====")
+    print(f"Number of masses evaluated: {len(masses)}")
+    print(f"Masses evaluated: {masses}")
+    print(f"Mean success rate: {np.array(success_rates).mean():.2%}")
+    print(f"=======================")
+
 
     # save stats for plotting
     out_json = model_path.replace(".zip", "_sweep_stats.json")
     with open(out_json, "w") as f:
         json.dump({
             "masses": list(map(float, masses)),
-            "mean_return": mean_returns,
-            "std_return": stds_returns,
-            "min_return": min_returns,
-            "max_return": max_returns,
-            "success_rate": success_rates,
+            "mean_returns": mean_returns,
+            "std_returns": stds_returns,
+            "min_returns": min_returns,
+            "max_returns": max_returns,
+            "success_rates": success_rates,
         }, f, indent=4)
     print(f"\nStatistics saved to {out_json}")
 
