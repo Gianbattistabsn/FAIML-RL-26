@@ -91,10 +91,10 @@ def evaluate(model_path: str,
 
         returns = np.array(episode_returns, dtype=np.float32)
 
-        mean_return = returns.mean()
-        std_return = returns.std()
-        min_return = returns.min()
-        max_return = returns.max()
+        mean_return = float(returns.mean())
+        std_return = float(returns.std())
+        min_return = float(returns.min())
+        max_return = float(returns.max())
         success_rate = float(np.mean(successes)) if successes else 0.0
 
         mean_returns.append(mean_return)
@@ -114,6 +114,8 @@ def evaluate(model_path: str,
 
     env.close()
 
+    print("Masses check")
+
     # save stats for plotting
     out_json = model_path.replace(".zip", "_sweep_stats.json")
     with open(out_json, "w") as f:
@@ -125,7 +127,7 @@ def evaluate(model_path: str,
             "max_return": max_returns,
             "success_rate": success_rates,
         }, f, indent=4)
-    print(f"Statistics saved to {out_json}")
+    print(f"\nStatistics saved to {out_json}")
 
 if __name__ == "__main__":
     args = parse_args_eval()
