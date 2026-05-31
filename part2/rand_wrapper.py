@@ -19,7 +19,11 @@ class RandomizationWrapper(gym.Wrapper):
             - 'adr': canonical Automatic Domain Randomization — boundaries expand outward
               indefinitely (low bound only floored at `_MIN_PHYSICAL_MASS`).
             - 'badr': Bounded ADR — same boundary-driven curriculum as ADR, but expansion
-              is hard-clamped against the user-provided `mass_range`.
+              is hard-clamped against the user-provided `mass_range`. Once a side reaches
+              its hard limit it is marked saturated: boundary sampling on that side stops
+              and any further expansion/retraction attempt against it is suppressed. When
+              both sides are saturated the wrapper falls back to pure uniform sampling
+              over the full `mass_range`.
         mass_range (tuple[float, float]): The mass range. The first value must be less
             than or equal to the second, and greater than or equal to `_MIN_PHYSICAL_MASS`
             (currently 1e-3). Its meaning depends on `mode`:
@@ -32,8 +36,10 @@ class RandomizationWrapper(gym.Wrapper):
             - In BADR mode the sampling range also starts at the midpoint of `mass_range`,
               but `mass_range[0]` and `mass_range[1]` are reinterpreted as **hard outer
               limits**: expansion clamps `_mass_min` against `mass_range[0]` and `_mass_max`
-              against `mass_range[1]` and can never exceed them. Retraction behaves as in
-              canonical ADR.
+              against `mass_range[1]` and can never exceed them. Once a side touches its
+              limit it is marked saturated and frozen — no further expansion, no retraction,
+              and no boundary sampling on that side. When both sides are saturated, every
+              subsequent sample is drawn uniformly from `[mass_range[0], mass_range[1]]`.
         seed (int, optional): Seed for the internal random number generator to ensure
             reproducibility.
         adr_delta (float): The step size used to expand or retract the randomization boundaries
@@ -45,7 +51,10 @@ class RandomizationWrapper(gym.Wrapper):
         adr_perf_high (float): The upper mean return threshold. If boundary performance exceeds
             this value, the randomization range expands.
         adr_boundary_prob (float): The probability (between 0.0 and 1.0) of sampling at the
-            exact boundaries instead of the interior range in ADR/BADR mode.
+            exact boundaries instead of the interior range in ADR/BADR mode. In BADR mode this
+            probability degrades as sides saturate: with one side saturated, the full
+            `adr_boundary_prob` is spent on the remaining informative side; with both
+            saturated, boundary sampling is disabled (effective probability 0).
 
     Raises:
         ValueError: If an unrecognized `mode` is provided (not one of 'none', 'udr', 'adr',
@@ -140,7 +149,9 @@ class RandomizationWrapper(gym.Wrapper):
         # one of: "none" | "udr" | "adr_low" | "adr_high" | "adr_interior"
         self._last_sample_type: str = "none"
 
-        # limits reached flags for badr sampling behavior
+        # BADR per-side saturation flags. Flip to True (via `_expand_bound`) when the
+        # corresponding bound reaches its user-provided hard limit. Once True, the side
+        # is locked: no further boundary sampling, no expansion, no retraction.
         self._badr_upper_saturated = False
         self._badr_lower_saturated = False
 
@@ -168,7 +179,7 @@ class RandomizationWrapper(gym.Wrapper):
         environment based on the active domain randomization strategy. Depending on
         the configured `mode`, it delegates the mass generation to UDR (`_sample_mass_udr`)
         or to the shared ADR/BADR sampler (`_sample_mass_adr`). The difference between
-        canonical ADR and BADR matters only when boundaries are updated, not when a
+        canonical ADR and BADR only matters when boundaries are updated, not when a
         sample is drawn from the current range — both modes share the sampler. If
         randomization is disabled (mode is "none"), the sampling process is bypassed.
 
@@ -223,17 +234,27 @@ class RandomizationWrapper(gym.Wrapper):
 
         Shared by both `adr` and `badr` modes — the two strategies differ only in how
         boundaries are updated (see `_expand_bound`), not in how a mass is drawn from
-        the current range.
+        the current range. In ADR mode the saturation flags never flip, so the
+        symmetric "boundary with prob p, interior with prob 1-p" behavior always
+        applies. In BADR mode the sampling behavior degrades as sides saturate
+         against their hard limits.
 
-        Generates a mass value dynamically based on performance boundaries. With a
-        probability of `adr_boundary_prob`, the method performs boundary sampling
-        (picking the exact lower or upper limit with equal probability). Otherwise,
-        it performs interior sampling, drawing from a uniform distribution bounded
-        by the current `_mass_min` and `_mass_max`.
+        Selection logic:
+            - Neither side saturated: with probability `adr_boundary_prob` pick one of
+              the two current boundaries with equal probability; otherwise draw
+              uniformly from `[_mass_min, _mass_max]`.
+            - Exactly one side saturated (BADR only): the full `adr_boundary_prob` is
+              spent on the remaining informative side — no coin flip, the unsaturated
+              side is chosen deterministically.
+            - Both sides saturated (BADR only): boundary sampling is disabled, every
+              sample is uniform over `[_mass_min, _mass_max]` (which by then equals
+              the user-provided `mass_range`).
 
         Side-effects:
-            Updates `self._last_sample_type` to indicate "adr_low", "adr_high", or "adr_interior".
-            Updates `self._current_boundary` to "low", "high", or None depending on the sampled location.
+            Updates `self._last_sample_type` to indicate "adr_low", "adr_high", or
+            "adr_interior".
+            Updates `self._current_boundary` to "low", "high", or None depending on
+            the sampled location.
 
         Returns:
             float: A mass value sampled according to the current ADR/BADR bounds.
@@ -278,14 +299,21 @@ class RandomizationWrapper(gym.Wrapper):
               upper boundary is unbounded (canonical ADR behavior).
             - In BADR mode both boundaries are additionally clamped against
               `_mass_min_limit` / `_mass_max_limit` so the range never exceeds the
-              user-provided `mass_range`.
+              user-provided `mass_range`. When either side touches its hard limit it
+              is marked saturated by `_expand_bound`; subsequent expansion or
+              retraction attempts against the saturated side are silently dropped.
+              When both sides are saturated this method returns immediately without
+              processing either buffer.
 
         Retractions are clamped against the opposite dynamic bound so that
-        `_mass_min <= _mass_max` always holds (mode-agnostic).
+        `_mass_min <= _mass_max` always holds (mode-agnostic), with the additional
+        BADR rule that saturated sides are not retracted.
 
         Side-effects:
             Updates `self._mass_min` or `self._mass_max`.
             Clears the evaluated performance buffer (`_buffer_low` or `_buffer_high`).
+            May indirectly set `_badr_lower_saturated` / `_badr_upper_saturated`
+            (and clear the matching buffer) via `_expand_bound`.
         """
         if self._badr_upper_saturated and self._badr_lower_saturated:
             return
@@ -331,11 +359,22 @@ class RandomizationWrapper(gym.Wrapper):
           must stay strictly positive); the upper boundary is unbounded.
         - In BADR mode both boundaries are hard-clamped against the user-provided
           `_mass_min_limit` / `_mass_max_limit` so the range can never exceed
-          `mass_range`.
+          `mass_range`. An already-saturated side is skipped (the call is a no-op
+          for that side). After the assignment, each boundary is re-checked against
+          its limit with `np.isclose`; if a boundary now lies at its limit, the
+          corresponding saturation flag (`_badr_lower_saturated` /
+          `_badr_upper_saturated`) is set to True and the matching performance
+          buffer is cleared.
 
         Args:
             bound: "low" to push the lower boundary down, "high" to push the upper
                 boundary up.
+
+        Side-effects:
+            Updates `self._mass_min` or `self._mass_max`.
+            In BADR mode, may set `self._badr_lower_saturated` /
+            `self._badr_upper_saturated` and clear `self._buffer_low` /
+            `self._buffer_high` when a side reaches its hard limit.
         """
         if not self._badr_lower_saturated and bound == "low":
             if self.mode == "adr":
@@ -365,12 +404,20 @@ class RandomizationWrapper(gym.Wrapper):
         """
         Pull the chosen boundary inward by `adr_delta`.
 
-        Mode-agnostic: in both ADR and BADR the retraction is clamped against the
-        opposite dynamic bound so that `_mass_min <= _mass_max` always holds.
+        Retraction is clamped against the opposite dynamic bound so that
+        `_mass_min <= _mass_max` always holds (mode-agnostic). In BADR mode a side
+        that has already saturated against its hard limit is treated as locked and
+        will not be retracted — the corresponding flag (`_badr_lower_saturated` /
+        `_badr_upper_saturated`) short-circuits the operation. In ADR mode the
+        flags are never set, so retraction always proceeds.
 
         Args:
             bound: "low" to pull the lower boundary up, "high" to pull the upper
                 boundary down.
+
+        Side-effects:
+            Updates `self._mass_min` or `self._mass_max` (no-op when the targeted
+            side is BADR-saturated).
         """
         if not self._badr_lower_saturated and bound == "low":
             # clamped against self._mass_max to preserve interval sanity
@@ -389,9 +436,14 @@ class RandomizationWrapper(gym.Wrapper):
         Execute an environment step and track ADR / BADR performance.
 
         In ADR or BADR mode, this method accumulates rewards to calculate the total
-        episode return. If the episode ends and a boundary was being tested, the
-        result is stored in the appropriate buffer for future boundary updates and
-        `_update_boundaries` is called.
+        episode return. If the episode ends and a boundary was being tested for the
+        current episode (`self._current_boundary is not None`), the result is stored
+        in the appropriate side's buffer and `_update_boundaries` is invoked.
+
+        In BADR mode, after a side saturates `_sample_mass_adr` stops choosing that
+        side as a boundary, so `_current_boundary` will only ever be the still-
+        informative side or None — the corresponding buffer therefore stops growing
+        organically once a side is locked.
 
         In UDR or 'none' mode this method is a transparent pass-through to the
         underlying env.
@@ -430,10 +482,9 @@ class RandomizationWrapper(gym.Wrapper):
         """
         Reset the environment and apply a new randomized mass.
 
-        Resets the episode return accumulator to zero. Next, it samples a new mass
-        value based on the active randomization strategy. If a valid mass is generated
-        (UDR, ADR, or BADR mode), the targeted object's mass is changed in the
-        underlying physics simulation. In 'none' mode no mass change is applied.
+        Resets the episode return accumulator to zero, samples a new mass value via
+        `_sample_mass` according to the active mode. In 'none' mode no mass
+        change is applied.
 
         Args:
             **kwargs: Additional keyword arguments passed directly to the base
