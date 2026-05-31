@@ -140,6 +140,10 @@ class RandomizationWrapper(gym.Wrapper):
         # one of: "none" | "udr" | "adr_low" | "adr_high" | "adr_interior"
         self._last_sample_type: str = "none"
 
+        # limits reached flags for badr sampling behavior
+        self._badr_upper_saturated = False
+        self._badr_lower_saturated = False
+
     # attribute getters for wandb logging
     @property
     def mass_min(self) -> float:
@@ -235,28 +239,30 @@ class RandomizationWrapper(gym.Wrapper):
             float: A mass value sampled according to the current ADR/BADR bounds.
         """
         # boundary sampling with p = self.adr_boundary_prob
-        if self._rng.random() < self.adr_boundary_prob:
+        if (not (self._badr_upper_saturated and self._badr_lower_saturated)
+                and self._rng.random() < self.adr_boundary_prob):
 
-            # upper or lower boundary sampling with equal probability
-            if self._rng.random() < 0.5:
+            can_low = not self._badr_lower_saturated
+            can_high = not self._badr_upper_saturated
 
-                # lower boundary sampling
+            # coin flip if both sides available, else take the remaining one
+            pick_low = (self._rng.random() < 0.5) if (can_low and can_high) else can_low
+
+            if pick_low:
                 self._last_sample_type = "adr_low"
                 self._current_boundary = "low"
                 return self._mass_min
-
             else:
-
-                # upper boundary sampling
                 self._last_sample_type = "adr_high"
                 self._current_boundary = "high"
                 return self._mass_max
 
+
         # interior sampling with p = 1 - self.adr_boundary_prob
-        else:
-            self._last_sample_type = "adr_interior"
-            self._current_boundary = None
-            return self._rng.uniform(self._mass_min, self._mass_max)
+        # or p = 1 if saturated
+        self._last_sample_type = "adr_interior"
+        self._current_boundary = None
+        return self._rng.uniform(self._mass_min, self._mass_max)
 
     def _update_boundaries(self) -> None:
         """
@@ -281,6 +287,8 @@ class RandomizationWrapper(gym.Wrapper):
             Updates `self._mass_min` or `self._mass_max`.
             Clears the evaluated performance buffer (`_buffer_low` or `_buffer_high`).
         """
+        if self._badr_upper_saturated and self._badr_lower_saturated:
+            return
         # lower boundary update if buffer size reached
         if len(self._buffer_low) >= self.adr_buffer_size:
 
@@ -329,7 +337,7 @@ class RandomizationWrapper(gym.Wrapper):
             bound: "low" to push the lower boundary down, "high" to push the upper
                 boundary up.
         """
-        if bound == "low":
+        if not self._badr_lower_saturated and bound == "low":
             if self.mode == "adr":
                 # clamped against the physical-plausibility floor: mass must stay strictly positive
                 self._mass_min = max(self._mass_min - self.adr_delta, self._MIN_PHYSICAL_MASS)
@@ -337,14 +345,21 @@ class RandomizationWrapper(gym.Wrapper):
                 # clamped against the user-provided lower limit
                 self._mass_min = max(self._mass_min - self.adr_delta, self._mass_min_limit)
 
-        # bound = high
-        else:
+        elif not self._badr_upper_saturated and bound == "high":
             if self.mode == "adr":
                 # unlimited expansion of upper bound
                 self._mass_max = self._mass_max + self.adr_delta
             else:   # badr
                 # clamped against the user-provided upper limit
                 self._mass_max = min(self._mass_max + self.adr_delta, self._mass_max_limit)
+
+        if self.mode == "badr":
+            if np.isclose(self._mass_min, self._mass_min_limit):
+                self._buffer_low = []
+                self._badr_lower_saturated = True
+            if np.isclose(self._mass_max, self._mass_max_limit):
+                self._buffer_high = []
+                self._badr_upper_saturated = True
 
     def _retract_bound(self, bound: str):
         """
@@ -357,12 +372,12 @@ class RandomizationWrapper(gym.Wrapper):
             bound: "low" to pull the lower boundary up, "high" to pull the upper
                 boundary down.
         """
-        if bound == "low":
+        if not self._badr_lower_saturated and bound == "low":
             # clamped against self._mass_max to preserve interval sanity
             self._mass_min = min(self._mass_min + self.adr_delta, self._mass_max)
 
         # bound = high
-        else:
+        elif not self._badr_upper_saturated and bound == "high":
             #  clamped against self._mass_min to preserve interval sanity
             self._mass_max = max(self._mass_max - self.adr_delta, self._mass_min)
 
@@ -396,7 +411,7 @@ class RandomizationWrapper(gym.Wrapper):
             self._episode_return += float(reward)
 
         # episode ended ?
-        done = terminated or truncated #TODO we can try to see what happens if truncated is not considered for performance evaluation
+        done = terminated or truncated
 
         # if episode ended and adr mode has done boundary sampling, update relative buffer
         if done and self.mode in ("adr", "badr") and self._current_boundary is not None:
