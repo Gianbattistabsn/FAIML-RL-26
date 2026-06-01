@@ -5,7 +5,8 @@ from torch.distributions import Normal
 
 
 def discount_rewards(r, gamma):
-    """Compute discounted returns G_t for each timestep t in an episode.
+    """
+    Compute discounted returns G_t for each timestep t in an episode.
 
     REINFORCE needs the *return* G_t, not just the immediate reward r_t.
     The return is the sum of all future rewards, each one discounted by gamma:
@@ -15,9 +16,6 @@ def discount_rewards(r, gamma):
     We iterate backwards so we can reuse the value computed for t+1:
 
         G_t = r_t + gamma * G_{t+1}
-
-    gamma < 1 (e.g. 0.99) makes rewards far in the future worth less,
-    which keeps G_t finite and prioritises near-term outcomes.
     """
     discounted_r = torch.zeros_like(r)
     running_add = 0
@@ -51,7 +49,7 @@ class Policy(torch.nn.Module):
         # sigma is a learnable parameter: the network decides how much to explore.
         self.sigma_activation = F.softplus
         init_sigma = 0.5
-        self.sigma = torch.nn.Parameter(torch.zeros(self.action_space)+init_sigma) #self.sigma = [0.5,0.5,0.5]
+        self.sigma = torch.nn.Parameter(torch.zeros(self.action_space)+init_sigma) # self.sigma = [0.5,0.5,0.5]
 
         
         self.init_weights()
@@ -62,7 +60,7 @@ class Policy(torch.nn.Module):
         # TASK 3: critic network for actor-critic algorithm
         self.fc1_critic = torch.nn.Linear(state_space, self.hidden)
         self.fc2_critic = torch.nn.Linear(self.hidden, self.hidden)
-        self.fc3_critic = torch.nn.Linear(self.hidden, 1) #V(s) is a scalar function
+        self.fc3_critic = torch.nn.Linear(self.hidden, 1) # V(s) is a scalar function
         for layer in (self.fc1_critic, self.fc2_critic, self.fc3_critic):
             torch.nn.init.normal_(layer.weight)
             torch.nn.init.zeros_(layer.bias)
@@ -140,7 +138,7 @@ class Agent(object):
         self.done = []
         # Circular buffer storing G_0 (discounted return from t=0) of recent episodes.
         # Used by the adaptive baseline (baseline == -1) to estimate E[G_0].
-        # N=500 balances stability (smooth estimate) vs. responsiveness to policy changes.
+        # N=100 balances stability (smooth estimate) vs. responsiveness to policy changes.
         self.g0_history = []
 
 
@@ -155,48 +153,39 @@ class Agent(object):
         done = torch.Tensor(self.done).to(self.train_device)
 
         # TASK 2:
-        #   - compute discounted returns
+        #  compute discounted returns
         G_t = discount_rewards(rewards, self.gamma)
-        #   - compute policy gradient loss function given actions and returns
+        #  compute policy gradient loss function given actions and returns
         if algorithm == 'reinforce' and done[-1] == True:
             if baseline == -1:
-                # Adaptive constant baseline.
-                # Estimate the 25th percentile of G_0 from the last 100 observed
-                # discounted returns (N=100 balances stability vs. responsiveness).
-                # Using the 25th percentile instead of the mean keeps the baseline
-                # below the current average return, so the majority of advantages
-                # remain positive and the gradient signal does not collapse when
-                # performance plateaus.
-                #   b = percentile_25(last-500 G_0)
-                # Use pure REINFORCE (baseline=0) for the first 10 episodes so that
-                # all advantages are positive and the policy gets a useful learning signal
-                # from the very start.  Once we have enough history, switch to the
-                # adaptive percentile baseline which stabilises learning at higher performance.
+                """
+                Adaptive constant baseline.
+                Estimate the 25th percentile of G_0 from the last 100 observed discounted returns.
+                Using the 25th percentile instead of the mean keeps the baseline
+                below the current average return, so the majority of advantages
+                remain positive and the gradient signal does not collapse when performance plateaus.
+                  b = percentile_25(last-100 G_0)
+                Use pure REINFORCE (baseline=0) for the first 10 episodes so that
+                all advantages are positive and the policy gets a useful learning signal
+                from the very start.  Once we have enough history, switch to the
+                adaptive percentile baseline which stabilises learning at higher performance.
+                """
                 if len(self.g0_history) >= 10:
-                    # 25th percentile of recent G_0: keeps the baseline below the
-                    # current average return so ~75% of episodes yield a positive
-                    # advantage at t=0, providing strong gradient signal.
+                    # 25th percentile of recent G_0
                     g0_hat = float(np.percentile(self.g0_history[-100:], 25))
                 else:
                     g0_hat = 0.0
                 baseline_vector = g0_hat
                 advantage = G_t - baseline_vector
                 if normalize:
-                    # Divide by std to normalise gradient magnitude across episodes.
-                    # We do NOT subtract the mean: the baseline already keeps the
-                    # advantages mostly positive, and removing the intra-episode mean
-                    # would discard information about whether this episode was above average.
                     advantage = advantage / (advantage.std() + 1e-8)
-                # Append current G_0 AFTER using the history so the current episode
-                # does not bias its own baseline estimate.
+                # Append current G_0 AFTER using the history so the current episode does not bias its own baseline estimate.
                 self.g0_history.append(G_t[0].item())
                 actor_loss = (-advantage * action_log_probs).mean()
             else:
                 # Fixed constant baseline: subtract the same value from every G_t.
-                #   baseline=0  → pure REINFORCE (no baseline)
-                #   baseline=k  → subtract the constant k from every return
-                # If normalize=True, whiten the advantage (zero mean, unit std within
-                # the episode) for scale-invariant gradient updates.
+                #   baseline=0  -> pure REINFORCE (no baseline)
+                #   baseline=k  -> subtract the constant k from every return
                 advantage = G_t - baseline
                 if normalize:
                     advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
@@ -212,7 +201,7 @@ class Agent(object):
             return actor_loss.item(), actor_loss.item()
         
         elif algorithm=='actor_critic':
-            #computing bootstrapped estimate, aka R_t+1 + gamma V(S_t+1)
+            # computing bootstrapped estimate, aka R_t+1 + gamma V(S_t+1)
             current_state = states[-1]
             next_state = next_states[-1]
             reward = rewards[-1]
@@ -224,7 +213,7 @@ class Agent(object):
                 # Therefore we assume it to be 0
                 estimate_value = reward
 
-            #compute the advantage δ_t
+            #compute the advantage delta_t
             value = self.policy(current_state, critic = True) #V(S_t)
             delta = estimate_value.detach() - value
 
@@ -281,12 +270,6 @@ class Agent(object):
 
         else:   # stochastic: draw one sample from N(mu, sigma)
             action = normal_dist.sample()   # shape: (action_space,) = (3,)
-
-            # Why do we need log π(a|s)? 
-            # The REINFORCE gradient is:  ∇J = E[ G_t · ∇ log π(a_t|s_t) ]
-            # We need log π(a|s) so PyTorch can differentiate through it
-            # with .backward() later.
-            #
             # Why sum() over the 3 action dimensions? 
             # The 3 joints are modelled as *independent* Gaussians, so the
             # joint probability of taking all 3 actions together is:
@@ -300,6 +283,7 @@ class Agent(object):
             #
             # normal_dist.log_prob(action) gives [log p(a[0]), log p(a[1]), log p(a[2])],
             # and .sum() collapses them into a single scalar log π(a|s).
+
             action_log_prob = normal_dist.log_prob(action).sum()
             #print(action_log_prob)
 
@@ -307,7 +291,8 @@ class Agent(object):
 
 
     def store_outcome(self, state, next_state, action_log_prob, reward, done):
-        """Buffer one (s, s', log π(a|s), r, done) transition.
+        """
+        Buffer one (s, s', log π(a|s), r, done) transition.
 
         REINFORCE is a Monte Carlo method: it needs the *complete* episode
         before it can compute G_t and update the policy.  We therefore store

@@ -1,7 +1,3 @@
-"""Sample script for training a control policy on the Hopper environment
-
-    Here you will implement the training loop for REINFORCE and Actor-Critic
-"""
 import datetime
 import os
 import random
@@ -16,14 +12,14 @@ from agent import Agent, Policy
 
 algorithm = 'reinforce'   # which algorithm to use: 'reinforce' or 'actor_critic'
 baseline = 20             # subtract this constant from the return to reduce gradient variance
-                          #   -1 -> adaptive: b = percentile_25(last-500 G_0), subtracted from every G_t
+                          #   -1 -> adaptive: b = percentile_25(last-100 G_0), subtracted from every G_t
                           #    0 -> pure REINFORCE (optionally whiten G_t if normalize=True)
                           #   >0 -> fixed constant: subtracts baseline from every G_t
 run_name = f'baseline_{baseline}'  # just a label so I can tell different runs apart in the filename
 
-NUM_EPISODES = 20000      # how many full episodes to train for
-SEED = 42                 # random seed to ensure reproducibility
-RENDER = False            # set to True to open a window and watch the agent train (slow!)
+NUM_EPISODES = 20000 # how many full episodes to train for
+SEED = 42 # random seed to ensure reproducibility
+RENDER = False # set to True to open a window and watch the agent train (slow!)
 
 
 def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False, normalize=False, device='auto', learning_rate=1e-3):
@@ -59,14 +55,14 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False,
     sigma_history = []  # σ snapshot (after softplus) every 100 episodes, for plotting
     total_reward = 0.0  # running sum of all rewards across all episodes
     best_avg_reward = float('-inf')  # track the best 100-episode moving average seen so far
-    best_ckpt_path = None            # path to the current best checkpoint on disk
-    train_start = time.time()        # wall-clock start for elapsed-time display
-    interval_start = time.time()     # wall-clock start of the current 100-ep interval
+    best_ckpt_path = None # path to the current best checkpoint on disk
+    train_start = time.time() # wall-clock start for elapsed-time display
+    interval_start = time.time() # wall-clock start of the current 100-ep interval
 
     for i in range(num_episodes):
         done = False
         # Reset the environment at the start of each episode.
-        # I vary the seed per episode so the agent sees slightly different starting states.
+        # Vary the seed per episode so the agent sees slightly different starting states.
         state, _ = env.reset(seed=seed + i)
         ep_reward = 0.0
         ep_length = 0
@@ -75,7 +71,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False,
         while not done:
             # Ask the policy what action to take given the current state.
             # evaluation=False means we SAMPLE from the distribution (exploration).
-            # action_log_prob is log π(a|s) – needed to compute the policy gradient.
+            # action_log_prob is log π(a|s) -> needed to compute the policy gradient.
             action, action_log_prob = agent.get_action(state, evaluation=False)
 
             # Send the action to the environment and get back the next state and reward.
@@ -91,7 +87,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False,
 
             # update_policy() is called every step for actor_critic.
             # For REINFORCE, the gradient update fires after the full episode (see below).
-            # All three baseline modes are handled inside update_policy; no resolution needed here.
+            # All three baseline modes are handled inside update_policy;
             if algorithm != 'reinforce':
                 actor_loss, critic_loss = agent.update_policy(algorithm=algorithm, baseline=baseline, normalize=normalize)
 
@@ -139,7 +135,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False,
 
             if avg_100 > best_avg_reward:
                 best_avg_reward = avg_100
-                # Delete the previous best checkpoint to avoid filling disk
+                # Delete the previous best checkpoint
                 if best_ckpt_path is not None and os.path.exists(best_ckpt_path):
                     os.remove(best_ckpt_path)
                 best_ckpt_path = os.path.join(
@@ -152,8 +148,7 @@ def train(algorithm, baseline, num_episodes, seed, checkpoint_dir, render=False,
 
     env.close()
 
-    # Save the final model. I encode total reward and mean reward in the filename
-    # so I can compare runs just by looking at the filenames without loading them.
+    # Save the final model. 
     final_path = os.path.join(checkpoint_dir, f"{algorithm}_{run_id}_{total_reward:.0f}_{num_episodes}_{total_reward/num_episodes:.1f}.pt")
     torch.save(policy.state_dict(), final_path)
     return policy, ep_rewards, ep_lengths, ep_actor_losses,ep_critic_losses, sigma_history, final_path

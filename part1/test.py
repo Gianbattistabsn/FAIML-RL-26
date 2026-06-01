@@ -1,7 +1,3 @@
-"""Sample script for training a control policy on the Hopper environment
-
-    Here you will implement the training loop for REINFORCE and Actor-Critic
-"""
 import numpy as np
 import gymnasium as gym
 import torch
@@ -9,9 +5,7 @@ from agent import Agent, Policy
 
 # How many episodes to run during evaluation
 NUM_EPISODES = 100
-# Random seed – changing this gives different starting states
 SEED = 42
-# Set to True to watch the agent in a window, False for headless evaluation
 RENDER = True
 
 
@@ -34,7 +28,7 @@ def evaluate(checkpoint_path, num_episodes=NUM_EPISODES, seed=SEED, render=True,
     policy = Policy(state_space=env.observation_space.shape[0], action_space=env.action_space.shape[0])
     policy.load_state_dict(torch.load(checkpoint_path, weights_only=False))
 
-    # Switch to eval mode – disables things like dropout that are only needed during training
+    # Switch to eval mode
     policy.eval()
     agent = Agent(policy)
 
