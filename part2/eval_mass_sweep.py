@@ -1,11 +1,13 @@
 import os
 import json
+import random
 
 import gymnasium as gym
 import numpy as np
 from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import panda_gym  # noqa: F401 - required so Panda envs are registered
+import torch
 
 from helpers.parse_arguments import parse_args_eval
 
@@ -23,41 +25,49 @@ def evaluate(model_path: str,
             "Make sure you saved your trained model with model.save(...)."
         )
 
-    env = DummyVecEnv(
-        [lambda: gym.make(id="PandaPush-v3",
-                          type=env_type,
-                          reward_type="dense")]
-    )
-
     # Auto-detect VecNormalize stats (.pkl) from model path
     vecnorm_path = model_path.replace(".zip", "_vecnormalize.pkl")
     if not vecnorm_path.endswith("_vecnormalize.pkl"):
         vecnorm_path = model_path + "_vecnormalize.pkl"
 
     if use_vecnormalize and os.path.exists(vecnorm_path):
-        env = VecNormalize.load(vecnorm_path, env)
-        env.training = False
-        env.norm_reward = False
         print(f"VecNormalize stats loaded from {vecnorm_path}")
     elif use_vecnormalize:
         print(f"[WARNING] {vecnorm_path} not found, evaluation in progress without normalization...")
     else:
         print("VecNormalize disabled (--no-vecnormalize)")
 
-    if "ppo" in model_path:
-        model = PPO.load(model_path, env=env)
-    else:
-        model = SAC.load(model_path, env=env)
-
-
     mean_returns = []
     stds_returns = []
     min_returns = []
     max_returns = []
     success_rates = []
+    seed = 42
 
     masses = masses if masses is not None else [1.0]
     for mass in masses:
+        # for reproducibility
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+        env = DummyVecEnv(
+            [lambda: gym.make(id="PandaPush-v3",
+                              type=env_type,
+                              seed=int(mass),
+                              reward_type="dense")]
+        )
+
+        if use_vecnormalize and os.path.exists(vecnorm_path):
+            env = VecNormalize.load(vecnorm_path, env)
+            env.training = False
+            env.norm_reward = False
+
+        if "ppo" in model_path:
+            model = PPO.load(model_path, env=env)
+        else:
+            model = SAC.load(model_path, env=env)
+
         # assign mass, manage both VecNormalize and plain DummyVecEnv as the outer wrapper
         base_vec = env.unwrapped if isinstance(env, VecNormalize) else env
         inner = base_vec.envs[0]
