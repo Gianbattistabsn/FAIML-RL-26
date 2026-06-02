@@ -54,7 +54,6 @@ def evaluate(model_path: str,
         env = DummyVecEnv(
             [lambda: gym.make(id="PandaPush-v3",
                               type=env_type,
-                              seed=int(mass),
                               reward_type="dense")]
         )
 
@@ -64,9 +63,9 @@ def evaluate(model_path: str,
             env.norm_reward = False
 
         if "ppo" in model_path:
-            model = PPO.load(model_path, env=env)
+            model = PPO.load(model_path, env=env, seed=seed)
         else:
-            model = SAC.load(model_path, env=env)
+            model = SAC.load(model_path, env=env, seed=seed)
 
         # assign mass, manage both VecNormalize and plain DummyVecEnv as the outer wrapper
         base_vec = env.unwrapped if isinstance(env, VecNormalize) else env
