@@ -1,75 +1,81 @@
-# Starting code for course project of FAIML - 01VSDWS
 
-Official assignment at [Google Doc](https://docs.google.com/document/d/1AXgLXux3l69vDAPLL-UYD3luFOw3JbyR-pLCS2yuNZk/edit?usp=sharing)
+# Robust Reinforcement Learning for Control and Robotics
 
-## Getting started
+This repository contains the Reinforcement Learning project developed for the
+**Fundamentals of Artificial Intelligence, Machine and Deep Learning** course at
+Politecnico di Torino.
 
-Before starting to implement your own code, make sure to:
-1. read and study the material provided (see Section 1 of the assignment)
-2. read the documentation of the main packages you will be using ([Gymnasium](https://gymnasium.farama.org), [stable-baselines3](https://stable-baselines3.readthedocs.io/en/master/index.html))
-3. play around with the code in the template to familiarize with all the tools. Especially with the `test_random_policy.py` script.
+> **For a complete description of the methodology, experimental setup, results
+> and conclusions, please refer to the
+> [Project Report](./FAIML_RL_Project_Report.pdf).**
+>
+> The report is the main reference for evaluating the project, while this
+> repository contains the corresponding implementations and experimental code.
 
+## Project Overview
 
-### 1. Local
+The project investigates reinforcement learning techniques for continuous-control
+and robotic-manipulation tasks. It is divided into two parts.
 
-if you have a Linux system, you can work on the course project directly on your local machine. By doing so, you will also be able to render the Mujoco Hopper environment and visualize what is happening.
-We highly suggest using Conda to manage the environment.
+### Part 1 — Continuous Control
 
-**Dependencies**
-- Run `pip install -r requirements.txt`
+We implemented and evaluated policy-gradient algorithms for the
+**MuJoCo Hopper** environment.
 
-Check your installation by launching `python test_random_policy.py`.
+The main activities included:
 
+- implementing **REINFORCE** from scratch in PyTorch;
+- implementing an **Actor–Critic** agent;
+- analysing training stability, convergence and policy performance;
+- comparing different architectural and hyperparameter choices.
 
-### 2. Google Colab
+### Part 2 — Robust Robotic Manipulation
 
-You can also run the code on [Google Colab](https://colab.research.google.com/)
+We trained reinforcement learning agents for a robotic pushing task based on the
+**Franka Panda** robot.
 
-- Download all files contained in the `colab_template` folder in this repo (inside phase_1 folder).
-- Load the `test_random_policy.ipynb` file on [https://colab.research.google.com/](colab) and follow the instructions on it.
+The main activities included:
 
-NOTE 1: rendering is currently **not** officially supported on Colab, making it hard to see the simulator in action. We recommend that each group manages to play around with the visual interface of the simulator at least once, to best understand what is going on with the underlying Hopper environment.
+- training and comparing **PPO** and **SAC** agents;
+- introducing variations in object dynamics and environment parameters;
+- evaluating agent robustness under distribution shifts;
+- comparing **Uniform Domain Randomization (UDR)**,
+  **Automatic Domain Randomization (ADR)** and
+  **Bounded Automatic Domain Randomization (BADR)**.
 
-NOTE 2: you need to stay connected to the Google Colab interface at all times for your python scripts to keep training.
+The objective was to study how domain-randomization strategies can improve the
+generalization and robustness of reinforcement learning policies when the
+deployment environment differs from the training environment.
 
-## 3. Extra step for Push task
-To train on the panda-gym task you have to follow these steps first:
+## Repository Structure
 
-```bash
-cd part2/panda-gym
-pip install -e .
-```
-
-## Project structure
-
-```
 FAIML-RL-26/
-├── README.md
+├── FAIML_RL_Project_Report.pdf
+├── part1/          # REINFORCE and Actor–Critic on MuJoCo Hopper
+├── part2/          # PPO, SAC and domain randomization on Panda Push
 ├── requirements.txt
-├── part1/ <-- about Hopper
-│   ├── agent.py
-│   ├── test_random_policy.py
-│   ├── train.py
-│   └── colab_template/
-│       └── test_random_policy.ipynb
-└── part2/ <-- about PushTask
-    ├── eval_sb3.py
-    ├── rand_wrapper.py <-- randomization wrapper for UDR/ADR
-    ├── test_random_policy.py
-    ├── train_sb3.py
-    └── panda-gym/
-        └── panda_gym/ (main package)
-            └── envs/
-                ├── core.py
-                ├── panda_tasks.py
-                ├── robots/
-                │   └── panda.py
-                └── tasks/
-                    ├── flip.py
-                    ├── pick_and_place.py
-                    ├── push.py <-- you will use this environment
-                    ├── reach.py
-                    ├── slide.py
-                    └── stack.py
-        
+└── README.md
+
+
+## Authors
+
+Project developed by:
+
+* Gianbattista Busonera
+* Giovanni Casati
+* Alessandro de Stasi
+* Gabriele Tebano
+
+## Course
+
+**Fundamentals of Artificial Intelligence, Machine and Deep Learning**
+Politecnico di Torino — Academic Year 2025/2026
+
+---
+
+The original repository was provided as the starting template for the course
+assignment. The implementations, experiments, analyses and project report
+contained in this fork were developed by the project team.
+
+```
 ```
