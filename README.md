@@ -47,15 +47,6 @@ The objective was to study how domain-randomization strategies can improve the
 generalization and robustness of reinforcement learning policies when the
 deployment environment differs from the training environment.
 
-## Repository Structure
-
-FAIML-RL-26/
-├── FAIML_RL_Project_Report.pdf
-├── part1/          # REINFORCE and Actor–Critic on MuJoCo Hopper
-├── part2/          # PPO, SAC and domain randomization on Panda Push
-├── requirements.txt
-└── README.md
-
 
 ## Authors
 
