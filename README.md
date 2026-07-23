@@ -7,7 +7,7 @@ Politecnico di Torino.
 
 > **For a complete description of the methodology, experimental setup, results
 > and conclusions, please refer to the
-> [Project Report](./FAIML_RL_Project_Report.pdf).**
+> [Project Report](./FAIML_RL_Project_Report.pdf.pdf).**
 >
 > The report is the main reference for evaluating the project, while this
 > repository contains the corresponding implementations and experimental code.
